@@ -38,7 +38,7 @@ with st.sidebar.form(key='measurement_form', clear_on_submit=True):
     tree_b = st.number_input("To Tree #", min_value=1, max_value=st.session_state.num_trees, step=1, value=2)
     distance = st.number_input("Tape Distance (meters)", min_value=0.01, max_value=30.0, step=0.01, value=1.00)
     
-    submit_button = st.form_submit_with_visible_label("Add to Network")
+    submit_button = st.form_submit_with_visible_label("Add to network")
 
 if submit_button:
     if tree_a == tree_b:
