@@ -68,7 +68,7 @@ if len(measurements) > 0:
         new_dist = st.number_input("New Dist (m):", min_value=0.01, max_value=30.0, value=t_d, step=0.01, key=f"edit_{target_idx}")
         update_clicked = st.button("💾 Update")
     with col2:
-        st.markdown("<br>", unsafe_allow_code=True) # visual spacer
+        st.markdown("<br>", unsafe_allow_html=True) # visual spacer
         delete_clicked = st.button("🗑️ Delete Entry", type="primary")
         
     if update_clicked:
