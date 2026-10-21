@@ -193,7 +193,7 @@ fig.update_layout(
     yaxis=dict(scaleanchor="x", scaleratio=1),
     width=750, height=450, margin=dict(l=20, r=20, t=40, b=20)
 )
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width=True)
 
 # ==========================================
 # 5. DATA INTEGRITY CHECK
