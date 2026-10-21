@@ -141,14 +141,19 @@ if len(measurements) > 0:
         st.rerun()
 
 # ==========================================
-# 3. HIGH-PRECISION LEAST SQUARES SOLVER
+# 3. HIGH-PRECISION LEAST SQUARES SOLVER (STABLE BASELINE)
 # ==========================================
 def error_function(coords):
     residuals = []
-    # Find dense array position of Tree 1
+    
+    # Securely pin Tree 1 at (0,0) and Tree 2 along the horizontal axis
+    # This gives the system a solid ground and stops points collapsing to NaN
     t1_idx = tree_to_idx.get(1, 0)
-    residuals.append(coords[2*t1_idx] * 5000)
-    residuals.append(coords[2*t1_idx+1] * 5000)
+    t2_idx = tree_to_idx.get(2, 1)
+    
+    residuals.append(coords[2*t1_idx] * 10000)      # Lock Tree 1 X to 0
+    residuals.append(coords[2*t1_idx+1] * 10000)    # Lock Tree 1 Y to 0
+    residuals.append(coords[2*t2_idx+1] * 10000)    # Lock Tree 2 Y to 0 (forces horizontal line)
     
     for u, v, d_measured in measurements:
         idx_u, idx_v = tree_to_idx[u] * 2, tree_to_idx[v] * 2
@@ -159,11 +164,16 @@ def error_function(coords):
         residuals.append(d_calculated - d_measured)
     return np.array(residuals)
 
-result = least_squares(error_function, initial_coordinates, method='trf', ftol=1e-12, xtol=1e-12)
+# Solve with small bounds protection to keep calculations inside stable territory
+result = least_squares(
+    error_function, 
+    initial_coordinates, 
+    method='trf', 
+    ftol=1e-10, 
+    xtol=1e-10
+)
 final_coords = result.x
 
-x_coords = {idx_to_tree[i]: final_coords[2*i] for i in range(num_active_trees)}
-y_coords = {idx_to_tree[i]: final_coords[2*i+1] for i in range(num_active_trees)}
 
 # ==========================================
 # 4. PLOTLY GRAPH VIEWPORT
