@@ -6,7 +6,7 @@ import os
 
 # Set up mobile-friendly page config
 st.set_page_config(page_title="Field Surveyor Network", layout="centered")
-st.title("🌳 Live Tree Map (Auto-Saving)")
+st.title("🌳 Live Tree Map (With Edit Tools)")
 
 # Define a local file path on the Streamlit server
 DATA_FILE = "survey_data.csv"
@@ -29,19 +29,6 @@ st.session_state.num_trees = 60
 num_trees = st.session_state.num_trees
 
 # ==========================================
-# GENERATE DETACHED INITIAL ESTIMATES (GUESSES)
-# ==========================================
-# Generate a clean, repeatable grid pattern of initial guesses so they are uniform
-np.random.seed(42)
-initial_coordinates = np.zeros(num_trees * 2)
-for i in range(num_trees):
-    initial_coordinates[2*i]     = np.random.uniform(0, 10)
-    initial_coordinates[2*i + 1] = np.random.uniform(0, 5)
-
-initial_coordinates[0] = 0.0 # Anchor Tree 1 X
-initial_coordinates[1] = 0.0 # Anchor Tree 1 Y
-
-# ==========================================
 # SIDEBAR: DATA INPUT 
 # ==========================================
 st.sidebar.header("📥 New Field Measurement")
@@ -61,8 +48,63 @@ if submit_button:
         st.rerun()
 
 # ==========================================
+# SIDEBAR: EDIT / DELETE EXISTING ENTRIES
+# ==========================================
+st.sidebar.markdown("---")
+st.sidebar.header("✏️ Edit / Delete Entries")
+
+if len(measurements) > 0:
+    # Create clean display labels for the dropdown list box
+    options_list = [f"[{idx}] Tree {u} ↔ Tree {v} ({d:.2f}m)" for idx, (u, v, d) in enumerate(measurements)]
+    selected_option = st.sidebar.selectbox("Select entry to modify:", options_list)
+    
+    # Extract the numerical entry index from the selection string
+    target_idx = int(selected_option.split("]")[0].replace("[", ""))
+    t_u, t_v, t_d = measurements[target_idx]
+    
+    # Side-by-side editing fields
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        new_dist = st.number_input("New Dist (m):", min_value=0.01, max_value=30.0, value=t_d, step=0.01, key=f"edit_{target_idx}")
+        update_clicked = st.button("💾 Update")
+    with col2:
+        st.markdown("<br>", unsafe_allow_code=True) # visual spacer
+        delete_clicked = st.button("🗑️ Delete Entry", type="primary")
+        
+    if update_clicked:
+        measurements[target_idx] = (t_u, t_v, new_dist)
+        # Rewrite the underlying CSV file completely with adjustments
+        with open(DATA_FILE, "w") as f:
+            f.write("tree_a,tree_b,distance\n")
+            for u, v, d in measurements:
+                f.write(f"{u},{v},{d}\n")
+        st.rerun()
+        
+    if delete_clicked:
+        if len(measurements) <= 1:
+            st.sidebar.error("Cannot delete the last baseline point!")
+        else:
+            measurements.pop(target_idx)
+            with open(DATA_FILE, "w") as f:
+                f.write("tree_a,tree_b,distance\n")
+                for u, v, d in measurements:
+                    f.write(f"{u},{v},{d}\n")
+            st.rerun()
+else:
+    st.sidebar.info("No recorded measurements to edit yet.")
+
+# ==========================================
 # ALGORITHM: LEAST SQUARES NET ADJUSTMENT
 # ==========================================
+np.random.seed(42)
+initial_coordinates = np.zeros(num_trees * 2)
+for i in range(num_trees):
+    initial_coordinates[2*i]     = np.random.uniform(0, 10)
+    initial_coordinates[2*i + 1] = np.random.uniform(0, 5)
+
+initial_coordinates[0] = 0.0
+initial_coordinates[1] = 0.0
+
 def error_function(coords):
     residuals = []
     residuals.append(coords[0] * 2000)
@@ -79,7 +121,6 @@ def error_function(coords):
 
 with st.spinner("Calculating optimal layout..."):
     result = least_squares(error_function, initial_coordinates, method='trf')
-
     final_coords = result.x
 
 x_coords = final_coords[0::2]
@@ -121,22 +162,19 @@ if not bad_measurements_found and len(measurements) > 5:
     st.success("✅ All data perfectly synchronized and structurally sound.")
 
 # ==========================================
-# ALL 3 DATASETS AVAILABLE TO DOWNLOAD HERE
+# EXPORT SURVIVAL FILES
 # ==========================================
 st.subheader("💾 Export Survey Files")
 
-# 1. Download File: Measurements
 with open(DATA_FILE, "r") as f:
     csv_data = f.read()
 st.download_button(label="Download 1. Raw Field Measurements Ledger (.csv)", data=csv_data, file_name="field_measurements.csv", mime="text/csv")
 
-# 2. Download File: Initial Guesses (Estimates)
 initial_xy_output = "Tree,Initial_X,Initial_Y\n"
 for i in range(num_trees):
     initial_xy_output += f"{i+1},{initial_coordinates[2*i]:.3f},{initial_coordinates[2*i+1]:.3f}\n"
 st.download_button(label="Download 2. Initial Guess Layout (.csv)", data=initial_xy_output, file_name="initial_guess_coordinates.csv", mime="text/csv")
 
-# 3. Download File: Optimized Positions (Final Maps)
 xy_output = "Tree,X_meters,Y_meters\n"
 for i in range(num_trees):
     xy_output += f"{i+1},{x_coords[i]:.3f},{y_coords[i]:.3f}\n"
