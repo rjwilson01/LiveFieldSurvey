@@ -62,18 +62,21 @@ if len(measurements) > 0:
     target_idx = int(selected_option.split("]")[0].replace("[", ""))
     t_u, t_v, t_d = measurements[target_idx]
     
-    # Side-by-side editing fields
+    # Use a dynamic, index-specific key for the number input to track changes instantly
+    new_dist = st.sidebar.number_input("New Distance (meters):", min_value=0.01, max_value=30.0, value=t_d, step=0.01, key=f"val_{target_idx}")
+    
+    # Side-by-side buttons
     col1, col2 = st.sidebar.columns(2)
     with col1:
-        new_dist = st.number_input("New Dist (m):", min_value=0.01, max_value=30.0, value=t_d, step=0.01, key=f"edit_{target_idx}")
-        update_clicked = st.button("💾 Update")
+        update_clicked = st.button("💾 Update Entry")
     with col2:
-        st.markdown("<br>", unsafe_allow_html=True) # visual spacer
         delete_clicked = st.button("🗑️ Delete Entry", type="primary")
         
     if update_clicked:
+        # Update our active working data array with the new distance value directly
         measurements[target_idx] = (t_u, t_v, new_dist)
-        # Rewrite the underlying CSV file completely with adjustments
+        
+        # Hard write the corrected values back onto the disk ledger file
         with open(DATA_FILE, "w") as f:
             f.write("tree_a,tree_b,distance\n")
             for u, v, d in measurements:
@@ -92,6 +95,7 @@ if len(measurements) > 0:
             st.rerun()
 else:
     st.sidebar.info("No recorded measurements to edit yet.")
+
 
 # ==========================================
 # ALGORITHM: LEAST SQUARES NET ADJUSTMENT
