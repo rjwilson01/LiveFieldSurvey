@@ -78,7 +78,8 @@ def error_function(coords):
     return np.array(residuals)
 
 with st.spinner("Calculating optimal layout..."):
-    result = least_squares(error_function, initial_coordinates, method='lm')
+    result = least_squares(error_function, initial_coordinates, method='trf')
+
     final_coords = result.x
 
 x_coords = final_coords[0::2]
