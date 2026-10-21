@@ -121,24 +121,47 @@ if submit_button:
             st.rerun()
 
 # ==========================================
-# SIDEBAR PANEL C: EDIT EXIST EXISTING ENTRIES
+# SIDEBAR PANEL C: EDIT EXISTING ENTRIES
 # ==========================================
 st.sidebar.markdown("---")
 st.sidebar.header("✏️ Edit / Delete Measurements")
 if len(measurements) > 0:
     options_list = [f"[{idx}] Tree {u} ↔ Tree {v} ({d:.2f}m)" for idx, (u, v, d) in enumerate(measurements)]
     selected_option = st.sidebar.selectbox("Select entry to modify:", options_list)
-    target_idx = int(selected_option.split("]")[0].replace("[", ""))
+    
+    # Clean up index string parsing split fix applied here
+    parts = selected_option.split("]")
+    target_idx = int(parts[0].replace("[", ""))
     t_u, t_v, t_d = measurements[target_idx]
     
     new_dist = st.sidebar.number_input("Change Distance (m):", min_value=0.01, max_value=30.0, value=t_d, step=0.01, key=f"val_{target_idx}")
-    if st.sidebar.button("💾 Update Entry"):
+    
+    col_up, col_rm = st.sidebar.columns(2)
+    with col_up:
+        update_clicked = st.button("💾 Update Entry")
+    with col_rm:
+        delete_clicked = st.button("🗑️ Delete Entry", type="primary")
+
+    if update_clicked:
         measurements[target_idx] = (t_u, t_v, new_dist)
         with open(DATA_FILE, "w") as f:
             f.write("tree_a,tree_b,distance\n")
             for u, v, d in measurements:
                 f.write(f"{u},{v},{d}\n")
         st.rerun()
+
+    if delete_clicked:
+        if len(measurements) <= 1:
+            st.sidebar.error("Cannot delete the last baseline point!")
+        else:
+            measurements.pop(target_idx)
+            with open(DATA_FILE, "w") as f:
+                f.write("tree_a,tree_b,distance\n")
+                for u, v, d in measurements:
+                    f.write(f"{u},{v},{d}\n")
+            st.rerun()
+else:
+    st.sidebar.info("No recorded measurements to edit yet.")
 
 # ==========================================
 # 3. HIGH-PRECISION LEAST SQUARES SOLVER (STABLE BASELINE)
@@ -147,13 +170,12 @@ def error_function(coords):
     residuals = []
     
     # Securely pin Tree 1 at (0,0) and Tree 2 along the horizontal axis
-    # This gives the system a solid ground and stops points collapsing to NaN
     t1_idx = tree_to_idx.get(1, 0)
     t2_idx = tree_to_idx.get(2, 1)
     
     residuals.append(coords[2*t1_idx] * 10000)      # Lock Tree 1 X to 0
     residuals.append(coords[2*t1_idx+1] * 10000)    # Lock Tree 1 Y to 0
-    residuals.append(coords[2*t2_idx+1] * 10000)    # Lock Tree 2 Y to 0 (forces horizontal line)
+    residuals.append(coords[2*t2_idx+1] * 10000)    # Lock Tree 2 Y to 0
     
     for u, v, d_measured in measurements:
         idx_u, idx_v = tree_to_idx[u] * 2, tree_to_idx[v] * 2
@@ -164,16 +186,12 @@ def error_function(coords):
         residuals.append(d_calculated - d_measured)
     return np.array(residuals)
 
-# Solve with small bounds protection to keep calculations inside stable territory
-result = least_squares(
-    error_function, 
-    initial_coordinates, 
-    method='trf', 
-    ftol=1e-10, 
-    xtol=1e-10
-)
+result = least_squares(error_function, initial_coordinates, method='trf', ftol=1e-10, xtol=1e-10)
 final_coords = result.x
 
+# Core coordinate outputs properly structured for the chart mapping loop
+x_coords = {idx_to_tree[i]: final_coords[2*i] for i in range(num_active_trees)}
+y_coords = {idx_to_tree[i]: final_coords[2*i+1] for i in range(num_active_trees)}
 
 # ==========================================
 # 4. PLOTLY GRAPH VIEWPORT
@@ -203,7 +221,7 @@ fig.update_layout(
     yaxis=dict(scaleanchor="x", scaleratio=1),
     width=750, height=450, margin=dict(l=20, r=20, t=40, b=20)
 )
-st.plotly_chart(fig, width=True)
+st.plotly_chart(fig)
 
 # ==========================================
 # 5. DATA INTEGRITY CHECK
