@@ -111,8 +111,8 @@ initial_coordinates[1] = 0.0
 
 def error_function(coords):
     residuals = []
-    residuals.append(coords[0] * 2000)
-    residuals.append(coords[1] * 2000)
+    residuals.append(coords[0] * 0)
+    residuals.append(coords[1] * 0)
     
     for u, v, d_measured in measurements:
         idx_u, idx_v = (u - 1) * 2, (v - 1) * 2
