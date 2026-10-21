@@ -128,7 +128,7 @@ st.sidebar.header("✏️ Edit / Delete Measurements")
 if len(measurements) > 0:
     options_list = [f"[{idx}] Tree {u} ↔ Tree {v} ({d:.2f}m)" for idx, (u, v, d) in enumerate(measurements)]
     selected_option = st.sidebar.selectbox("Select entry to modify:", options_list)
-    target_idx = int(selected_option.split("]").replace("[", ""))
+    target_idx = int(selected_option.split("]")[0].replace("[", ""))
     t_u, t_v, t_d = measurements[target_idx]
     
     new_dist = st.sidebar.number_input("Change Distance (m):", min_value=0.01, max_value=30.0, value=t_d, step=0.01, key=f"val_{target_idx}")
