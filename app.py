@@ -48,7 +48,6 @@ with open(DATA_FILE, "r") as f:
     for line in f:
         if line.strip():
             u, v, d = line.strip().split(",")
-            # Only include measurements if both trees actually exist right now
             if int(u) in trees_dict and int(v) in trees_dict:
                 measurements.append((int(u), int(v), float(d)))
 
@@ -56,7 +55,6 @@ with open(DATA_FILE, "r") as f:
 num_active_trees = len(active_tree_numbers)
 initial_coordinates = np.zeros(num_active_trees * 2)
 
-# Map our active sparse tree numbers (e.g. 1, 2, 3) to dense index positions (0, 1, 2)
 tree_to_idx = {t_num: idx for idx, t_num in enumerate(active_tree_numbers)}
 idx_to_tree = {idx: t_num for idx, t_num in enumerate(active_tree_numbers)}
 
@@ -74,7 +72,6 @@ col_add, col_del = st.sidebar.columns(2)
 with col_add:
     if st.button("➕ Add New Tree"):
         next_id = max_tree_id + 1
-        # Place new tree roughly near the last added tree with a small offset
         last_x, last_y = trees_dict[max_tree_id]
         trees_dict[next_id] = (last_x + 1.0, last_y + 0.5)
         
@@ -96,7 +93,6 @@ with col_del:
                 for t_id, (x, y) in sorted(trees_dict.items()):
                     f.write(f"{t_id},{x},{y}\n")
             st.rerun()
-
 # ==========================================
 # SIDEBAR PANEL B: TAPE MEASUREMENT FORM
 # ==========================================
@@ -129,7 +125,6 @@ if len(measurements) > 0:
     options_list = [f"[{idx}] Tree {u} ↔ Tree {v} ({d:.2f}m)" for idx, (u, v, d) in enumerate(measurements)]
     selected_option = st.sidebar.selectbox("Select entry to modify:", options_list)
     
-    # Clean up index string parsing split fix applied here
     parts = selected_option.split("]")
     target_idx = int(parts[0].replace("[", ""))
     t_u, t_v, t_d = measurements[target_idx]
@@ -164,18 +159,35 @@ else:
     st.sidebar.info("No recorded measurements to edit yet.")
 
 # ==========================================
-# 3. HIGH-PRECISION LEAST SQUARES SOLVER (STABLE BASELINE)
+# SIDEBAR PANEL D: MOVE INITIAL POSITION GUESS
+# ==========================================
+st.sidebar.markdown("---")
+st.sidebar.header("📍 Move Initial Position Guess")
+target_guess_tree = st.sidebar.selectbox("Tree # to reposition:", active_tree_numbers, index=min(2, len(active_tree_numbers)-1))
+curr_gx, curr_gy = trees_dict[target_guess_tree]
+
+new_gx = st.sidebar.slider(f"Tree {target_guess_tree} X (m):", -2.0, 15.0, curr_gx, 0.05)
+new_gy = st.sidebar.slider(f"Tree {target_guess_tree} Y (m):", -2.0, 10.0, curr_gy, 0.05)
+
+if st.sidebar.button("📍 Save Initial Position"):
+    trees_dict[target_guess_tree] = (new_gx, new_gy)
+    with open(TREES_FILE, "w") as f:
+        f.write("tree,x,y\n")
+        for t_id, (x, y) in sorted(trees_dict.items()):
+            f.write(f"{t_id},{x},{y}\n")
+    st.rerun()
+
+# ==========================================
+# 3. HIGH-PRECISION LEAST SQUARES SOLVER
 # ==========================================
 def error_function(coords):
     residuals = []
-    
-    # Securely pin Tree 1 at (0,0) and Tree 2 along the horizontal axis
     t1_idx = tree_to_idx.get(1, 0)
     t2_idx = tree_to_idx.get(2, 1)
     
-    residuals.append(coords[2*t1_idx] * 10000)      # Lock Tree 1 X to 0
-    residuals.append(coords[2*t1_idx+1] * 10000)    # Lock Tree 1 Y to 0
-    residuals.append(coords[2*t2_idx+1] * 10000)    # Lock Tree 2 Y to 0
+    residuals.append(coords[2*t1_idx] * 10000)      
+    residuals.append(coords[2*t1_idx+1] * 10000)    
+    residuals.append(coords[2*t2_idx+1] * 10000)    
     
     for u, v, d_measured in measurements:
         idx_u, idx_v = tree_to_idx[u] * 2, tree_to_idx[v] * 2
@@ -189,7 +201,6 @@ def error_function(coords):
 result = least_squares(error_function, initial_coordinates, method='trf', ftol=1e-10, xtol=1e-10)
 final_coords = result.x
 
-# Core coordinate outputs properly structured for the chart mapping loop
 x_coords = {idx_to_tree[i]: final_coords[2*i] for i in range(num_active_trees)}
 y_coords = {idx_to_tree[i]: final_coords[2*i+1] for i in range(num_active_trees)}
 
@@ -231,7 +242,7 @@ bad_runs = False
 for u, v, d_measured in measurements:
     dist_geo = np.sqrt((x_coords[u] - x_coords[v])**2 + (y_coords[u] - y_coords[v])**2)
     error = abs(dist_geo - d_measured)
-    if error > 0.05: # Strict 5cm flag
+    if error > 0.05:
         st.warning(f"Remeasure Target! Tree {u} ↔ {v}: Entry: {d_measured:.2f}m, Model: {dist_geo:.2f}m (Gap: {error*100:.1f} cm)")
         bad_runs = True
 
