@@ -2,3 +2,5 @@ numpy
 scipy
 matplotlib
 plotly
+streamlit>=1.36
+pandas
