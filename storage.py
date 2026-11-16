@@ -18,12 +18,12 @@ def init_files():
 def load_trees():
     init_files()
     frame = pd.read_csv(TREES_FILE)
-    return {int(row.tree): (float(row.x), float(row.y)) for row in frame.itertuples()}
+    return {int(row.tree): (int(round(float(row.x))), int(round(float(row.y)))) for row in frame.itertuples()}
 
 
 def save_trees(trees_dict):
     pd.DataFrame(
-        [{"tree": int(t), "x": float(x), "y": float(y)} for t, (x, y) in sorted(trees_dict.items())],
+        [{"tree": int(t), "x": int(round(x)), "y": int(round(y))} for t, (x, y) in sorted(trees_dict.items())],
         columns=["tree", "x", "y"],
     ).to_csv(TREES_FILE, index=False)
 

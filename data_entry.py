@@ -29,53 +29,56 @@ def persist_measurements():
 
 
 with st.sidebar:
-    st.header("Trees")
-    with st.form("add_tree"):
-        new_id = st.number_input("New tree ID", min_value=1, step=1, value=max(tree_ids, default=0) + 1)
-        x_guess = st.number_input("Initial X (mm)", value=0, step=500)
-        y_guess = st.number_input("Initial Y (mm)", value=0, step=500)
-        add_tree = st.form_submit_button("Add tree")
+    st.header("Tree management")
+    if "tree_editor_values" not in st.session_state:
+        st.session_state["tree_editor_values"] = {"id": max(tree_ids, default=0) + 1, "x": 0, "y": 0}
+    tree_form_revision = st.session_state.get("tree_form_revision", 0)
+    editor_values = st.session_state["tree_editor_values"]
+    with st.form(f"tree_management_{tree_form_revision}"):
+        tree_id = st.number_input("Tree ID", min_value=1, step=1, value=int(editor_values["id"]), key=f"tree_id_{tree_form_revision}")
+        is_anchor = int(tree_id) in (1, 2)
+        left, right = st.columns(2)
+        with left:
+            estimate_x = st.number_input("Initial X", value=int(editor_values["x"]), step=100, disabled=is_anchor, key=f"tree_x_{tree_form_revision}")
+        with right:
+            estimate_y = st.number_input("Initial Y", value=int(editor_values["y"]), step=100, disabled=int(tree_id) == 1, key=f"tree_y_{tree_form_revision}")
+        add_tree = st.form_submit_button("Add")
+        update_tree = st.form_submit_button("Update", disabled=int(tree_id) not in trees or int(tree_id) == 1)
+        delete_tree = st.form_submit_button("Delete", disabled=int(tree_id) not in trees or int(tree_id) in (1, 2))
+
     if add_tree:
-        if int(new_id) in trees:
-            st.error(f"Tree {int(new_id)} already exists.")
+        if int(tree_id) in trees:
+            st.error(f"Tree {int(tree_id)} already exists. Select it on the map and use Update.")
         else:
-            trees[int(new_id)] = (float(x_guess), float(y_guess))
+            trees[int(tree_id)] = (float(estimate_x), float(estimate_y))
             persist_trees()
+            st.session_state["tree_editor_values"] = {"id": int(tree_id), "x": int(estimate_x), "y": int(estimate_y)}
+            st.session_state["tree_form_revision"] = tree_form_revision + 1
             st.rerun()
-
-    if tree_ids:
-        deletable = [t for t in tree_ids if t not in (1, 2)]
-        if deletable:
-            with st.form("delete_tree"):
-                delete_id = st.selectbox("Tree to delete", deletable)
-                delete_tree = st.form_submit_button("Delete tree")
-            if delete_tree:
-                del trees[int(delete_id)]
-                measurements = [(a, b, d) for a, b, d in measurements if int(delete_id) not in (a, b)]
-                persist_trees()
-                persist_measurements()
-                st.session_state["selected_measurement_index"] = None
-                st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
-                st.rerun()
-        st.caption("Trees 1 and 2 define the origin and positive Y axis and are kept as anchors.")
-
-    st.divider()
-    st.header("Initial estimates")
-    if estimate_tree_ids:
-        if st.session_state.get("edit_estimate_tree") not in estimate_tree_ids:
-            st.session_state["edit_estimate_tree"] = estimate_tree_ids[0]
-        edit_id = st.selectbox("Tree to position", estimate_tree_ids, key="edit_estimate_tree")
-        gx, gy = trees[edit_id]
-        with st.form("edit_estimate"):
-            edit_x = st.number_input("Estimated X (mm)", value=float(gx), step=100.0, key=f"estimate_x_{edit_id}")
-            edit_y = st.number_input("Estimated Y (mm)", value=float(gy), step=100.0, key=f"estimate_y_{edit_id}")
-            save_estimate = st.form_submit_button("Save estimate")
-        if save_estimate:
-            trees[edit_id] = (float(edit_x), float(edit_y))
+    if update_tree:
+        if int(tree_id) == 1 or int(tree_id) not in trees:
+            st.error("Tree 1 is fixed at the origin. Select an existing non-origin tree to update it.")
+        else:
+            trees[int(tree_id)] = (0 if int(tree_id) == 2 else int(estimate_x), int(estimate_y))
             persist_trees()
+            st.session_state["tree_editor_values"] = {"id": int(tree_id), "x": int(trees[int(tree_id)][0]), "y": int(trees[int(tree_id)][1])}
+            st.session_state["tree_form_revision"] = tree_form_revision + 1
             st.rerun()
-    else:
-        st.caption("Add a tree to set a rough initial estimate. Trees 1 and 2 are reserved as anchors.")
+    if delete_tree:
+        if int(tree_id) in (1, 2) or int(tree_id) not in trees:
+            st.error("Trees 1 and 2 are anchors and cannot be deleted.")
+        else:
+            del trees[int(tree_id)]
+            measurements = [(a, b, d) for a, b, d in measurements if int(tree_id) not in (a, b)]
+            persist_trees()
+            persist_measurements()
+            st.session_state["selected_measurement_index"] = None
+            st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
+            st.session_state["pending_measurement_trees"] = []
+            st.session_state["tree_editor_values"] = {"id": max(trees, default=0) + 1, "x": 0, "y": 0}
+            st.session_state["tree_form_revision"] = tree_form_revision + 1
+            st.rerun()
+    st.caption("Click a tree marker to load its ID and starting estimate here. Add creates a tree; Update saves its estimate; Delete removes that tree and its measurements. Tree 1 is fixed at the origin and Tree 2 stays on the Y axis.")
 
     st.divider()
     st.header("Tape measurement")
@@ -146,7 +149,7 @@ if coords:
     grid_x = np.linspace(min_x, max_x, 31)
     grid_y = np.linspace(min_y, max_y, 31)
     tap_points = [(float(x), float(y)) for x in grid_x for y in grid_y]
-    fig.add_trace(go.Scatter(x=[p[0] for p in tap_points], y=[p[1] for p in tap_points], customdata=tap_points, mode="markers", marker={"size": 16, "color": "rgba(100,116,139,0.025)"}, hoverinfo="skip", showlegend=False, name="Tap to place estimate"))
+    fig.add_trace(go.Scatter(x=[p[0] for p in tap_points], y=[p[1] for p in tap_points], customdata=tap_points, mode="markers", marker={"size": 14, "color": "rgba(100,116,139,0.08)"}, hoverinfo="skip", showlegend=False, name="Tap to place estimate"))
     for measurement_index, (a, b, d) in enumerate(measurements):
         if a in coords and b in coords:
             xa, ya = coords[a]
@@ -171,11 +174,14 @@ for point in selected_points:
     curve_number = point.get("curve_number")
     if curve_number == 0 and estimate_tree_ids:
         tap_x, tap_y = point.get("customdata", (point.get("x"), point.get("y")))
-        selected_estimate_tree = int(st.session_state.get("edit_estimate_tree", estimate_tree_ids[0]))
-        if selected_estimate_tree not in estimate_tree_ids:
+        selected_estimate_tree = int(st.session_state["tree_editor_values"]["id"])
+        if selected_estimate_tree not in trees:
             selected_estimate_tree = estimate_tree_ids[0]
-        trees[selected_estimate_tree] = (float(tap_x), float(tap_y))
+        tap_x, tap_y = int(round(tap_x)), int(round(tap_y))
+        trees[selected_estimate_tree] = (tap_x, tap_y)
         persist_trees()
+        st.session_state["tree_editor_values"] = {"id": selected_estimate_tree, "x": tap_x, "y": tap_y}
+        st.session_state["tree_form_revision"] = st.session_state.get("tree_form_revision", 0) + 1
         st.session_state["map_revision"] = map_revision + 1
         st.rerun()
     line_start, line_end = 1, 1 + len(measurements)
@@ -187,6 +193,13 @@ for point in selected_points:
     tree_curve = line_end + 1
     if curve_number == tree_curve and point.get("customdata"):
         tree = int(point["customdata"][2])
+        initial_x, initial_y = trees[tree]
+        if tree == 1:
+            initial_x, initial_y = 0, 0
+        elif tree == 2:
+            initial_x = 0
+        st.session_state["tree_editor_values"] = {"id": tree, "x": int(round(initial_x)), "y": int(round(initial_y))}
+        st.session_state["tree_form_revision"] = st.session_state.get("tree_form_revision", 0) + 1
         pending = st.session_state.get("pending_measurement_trees", [])
         if not pending:
             st.session_state["pending_measurement_trees"] = [tree]
@@ -207,10 +220,10 @@ if solver_info and solver_info["success"]:
     for a, b, d in measurements:
         predicted = math.dist(coords[a], coords[b])
         residual = predicted - d
-        residual_rows.append({"From": a, "To": b, "Measured (mm)": int(round(d)), "Adjusted (mm)": int(round(predicted)), "Residual (mm)": int(round(residual))})
+        residual_rows.append({"From": a, "To": b, "Meas": int(round(d)), "Adj": int(round(predicted)), "Δ": int(round(residual))})
     for t, shift in moved:
         st.warning(f"Tree {t} moved {shift:.0f} mm from its saved initial estimate. Review the estimate or add/check measurements.")
-    high_residual_count = sum(abs(row["Residual (mm)"]) > distance_tolerance for row in residual_rows)
+    high_residual_count = sum(abs(row["Δ"]) > distance_tolerance for row in residual_rows)
     if high_residual_count:
         st.warning(f"{high_residual_count} measurement(s) exceed the residual threshold; they are highlighted in the table below.")
 elif measurements:
@@ -222,13 +235,13 @@ if measurements:
     for record_id, (a, b, d) in enumerate(measurements):
         residual_row = residual_rows[record_id] if solver_info and solver_info["success"] else {}
         table_rows.append({
-            "Record": record_id + 1,
+            "#": record_id + 1,
             "Pair": f"{min(a, b)} ↔ {max(a, b)}",
             "From": a,
             "To": b,
-            "Measured (mm)": int(round(d)),
-            "Adjusted (mm)": residual_row.get("Adjusted (mm)"),
-            "Residual (mm)": residual_row.get("Residual (mm)"),
+            "Meas": int(round(d)),
+            "Adj": residual_row.get("Adj"),
+            "Δ": residual_row.get("Δ"),
             "_record_id": record_id,
             "_pair": tuple(sorted((a, b))),
         })
@@ -241,7 +254,7 @@ if measurements:
         source = table_df.iloc[row.name]
         if source["_pair"] == highlighted_pair:
             return ["background-color: #ffedd5"] * len(row)
-        residual = source["Residual (mm)"]
+        residual = source["Δ"]
         if pd.notna(residual) and abs(residual) > distance_tolerance:
             return ["background-color: #fee2e2"] * len(row)
         return [""] * len(row)
@@ -269,7 +282,7 @@ if measurements:
 
     if selected_measurement is not None and 0 <= selected_measurement < len(measurements):
         a, b, old_distance = measurements[selected_measurement]
-        st.markdown(f"**Selected:** Tree {a} → Tree {b} · Record {selected_measurement + 1}")
+        st.markdown(f"**Selected:** Tree {a} → Tree {b} · Record #{selected_measurement + 1}")
         with st.form(f"edit_measurement_{selected_measurement}"):
             edited_distance = st.number_input("Measured distance (mm)", min_value=1, value=int(round(old_distance)), step=1)
             col_save, col_remove = st.columns(2)
@@ -290,7 +303,7 @@ if measurements:
             st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
             st.rerun()
     else:
-        st.caption("Measurements are grouped by unordered tree pair; each From → To reading remains a separate record. Click a row to edit it.")
+        st.caption("Measurements are grouped by tree pair; each From → To reading remains a separate record. Δ = adjusted minus measured, rounded to whole millimetres. Click a row to edit it.")
 else:
     st.caption("No tape measurements recorded yet.")
 
