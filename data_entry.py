@@ -42,6 +42,39 @@ dataset_info = storage.load_dataset_info()
 coords, solver_info = solver.run_network_adjustment(trees, measurements)
 
 
+def calculatable_tree_ids():
+    if not solver_info or not solver_info.get("success") or not solver_info.get("baseline_measured"):
+        return set()
+    links = {tree: 0 for tree in tree_ids}
+    neighbors = {tree: set() for tree in tree_ids}
+    for a, b, _ in measurements:
+        if a in links and b in links:
+            links[a] += 1
+            links[b] += 1
+            neighbors[a].add(b)
+            neighbors[b].add(a)
+    reachable = set()
+    pending = [1]
+    while pending:
+        tree = pending.pop()
+        if tree not in reachable:
+            reachable.add(tree)
+            pending.extend(neighbors[tree] - reachable)
+    return {tree for tree in tree_ids if tree in (1, 2) or (tree in reachable and links[tree] >= 3)}
+
+
+def suggested_measurement_distance(from_tree, to_tree):
+    if int(from_tree) == int(to_tree):
+        return 1
+    recorded = next((d for a, b, d in measurements if a == int(from_tree) and b == int(to_tree)), None)
+    if recorded is not None:
+        return max(1, int(round(recorded)))
+    calculatable = calculatable_tree_ids()
+    from_position = coords[int(from_tree)] if int(from_tree) in calculatable else trees[int(from_tree)]
+    to_position = coords[int(to_tree)] if int(to_tree) in calculatable else trees[int(to_tree)]
+    return max(1, int(round(math.dist(from_position, to_position))))
+
+
 with st.sidebar:
     st.header("Dataset")
     st.write(f"**{dataset_info['dataset_id']}**")
@@ -214,28 +247,41 @@ with st.sidebar:
         to_default = next((tree for tree in tree_ids if tree != from_default), from_default)
     if selected_measurement_index is not None:
         st.caption(f"Editing record #{selected_measurement_index + 1}. Use Cancel row edit to return to adding.")
-    with st.form(f"measurement_editor_{measurement_revision}"):
-        left, right = st.columns(2)
-        with left:
-            from_active = st.session_state["measurement_next_field"] == "from"
-            with st.container(border=True, key="from-picker"):
-                from_tree = st.selectbox("From tree", tree_ids, index=tree_ids.index(from_default), key=f"measurement_from_{measurement_revision}")
-        with right:
-            current_to_default = to_default if to_default != from_tree else next((tree for tree in tree_ids if tree != from_tree), from_tree)
-            to_active = st.session_state["measurement_next_field"] == "to"
-            with st.container(border=True, key="to-picker"):
-                to_tree = st.selectbox("To tree", tree_ids, index=tree_ids.index(current_to_default), key=f"measurement_to_{measurement_revision}")
-        distance = st.number_input("Distance (mm)", min_value=1, value=int(measurement_values.get("distance", 1000)), step=1, key=f"measurement_distance_{measurement_revision}")
+    from_key = f"measurement_from_{measurement_revision}"
+    to_key = f"measurement_to_{measurement_revision}"
+    distance_key = f"measurement_distance_{measurement_revision}"
+    st.session_state.setdefault(from_key, int(from_default))
+    st.session_state.setdefault(to_key, int(to_default))
+    st.session_state.setdefault(distance_key, max(1, int(measurement_values.get("distance", 1000))))
+
+    def refresh_suggested_distance():
+        picked_from = int(st.session_state[from_key])
+        picked_to = int(st.session_state[to_key])
+        picked_distance = suggested_measurement_distance(picked_from, picked_to)
+        st.session_state[distance_key] = picked_distance
+        st.session_state["measurement_editor_values"] = {"from": picked_from, "to": picked_to, "distance": picked_distance}
+
+    left, right = st.columns(2)
+    with left:
+        with st.container(border=True, key="from-picker"):
+            from_tree = st.selectbox("From tree", tree_ids, index=tree_ids.index(from_default), key=from_key, on_change=refresh_suggested_distance)
+    with right:
+        current_to_default = to_default if to_default != from_tree else next((tree for tree in tree_ids if tree != from_tree), from_tree)
+        with st.container(border=True, key="to-picker"):
+            to_tree = st.selectbox("To tree", tree_ids, index=tree_ids.index(current_to_default), key=to_key, on_change=refresh_suggested_distance)
+    distance = st.number_input("Distance (mm)", min_value=1, step=1, key=distance_key)
+    st.session_state["measurement_editor_values"] = {"from": int(from_tree), "to": int(to_tree), "distance": int(distance)}
+    if selected_measurement_index is not None:
         save_col, delete_col = st.columns(2)
         with save_col:
-            save_measurement = st.form_submit_button("Update measurement" if selected_measurement_index is not None else "Add measurement", disabled=len(tree_ids) < 2, width="stretch")
-        if selected_measurement_index is not None:
-            with delete_col:
-                delete_measurement = st.form_submit_button("Delete measurement", width="stretch")
-            cancel_measurement_edit = st.form_submit_button("Cancel row edit")
-        else:
-            delete_measurement = False
-            cancel_measurement_edit = False
+            save_measurement = st.button("Update measurement", disabled=len(tree_ids) < 2, width="stretch", key=f"measurement_save_{measurement_revision}")
+        with delete_col:
+            delete_measurement = st.button("Delete measurement", width="stretch", key=f"measurement_delete_{measurement_revision}")
+        cancel_measurement_edit = st.button("Cancel row edit", key=f"measurement_cancel_{measurement_revision}")
+    else:
+        save_measurement = st.button("Add measurement", disabled=len(tree_ids) < 2, width="stretch", key=f"measurement_save_{measurement_revision}")
+        delete_measurement = False
+        cancel_measurement_edit = False
 
     if save_measurement:
         if from_tree == to_tree:
@@ -412,10 +458,11 @@ for point in sorted(selected_points, key=lambda selected: selected.get("curve_nu
         else:
             to_selected = tree
             next_field = "from"
+        suggested_distance = suggested_measurement_distance(from_selected, to_selected)
         st.session_state["measurement_editor_values"] = {
             "from": from_selected,
             "to": to_selected,
-            "distance": measurement_values.get("distance", 1000),
+            "distance": suggested_distance,
         }
         st.session_state["measurement_next_field"] = next_field
         st.session_state["selected_measurement_index"] = None

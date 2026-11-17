@@ -29,6 +29,7 @@ with st.expander("Record and edit measurements", expanded=True):
     - Tap a tree marker to fill the highlighted **From** or **To** field. The next map pick alternates between these fields. Tapping the current endpoint keeps it and moves the next pick to the other field; a tree cannot measure to itself.
     - You may enter the two IDs with the dropdowns and type-to-search instead.
     - Tree 1 is at the lower-left origin and Tree 2 is above it on the Y axis. Tap a grid point to set the selected tree's starting estimate; then Add or Update in the sidebar.
+    - Choosing From and To fills the distance from an existing directed record when present. Otherwise, it estimates the distance from calculated positions where available, falling back to starting estimates. The distance remains editable.
     - Enter a distance in millimetres and press **Add measurement**. One record is allowed per direction for each pair, so A → B and B → A can both be stored.
     - Edit **Meas** directly in the table. Use the **Select** checkbox to load a record into the sidebar, where you can press **Update measurement** or **Delete measurement**. A line tap highlights all records for that pair.
     - Selecting a row shows its From and To trees, their initial coordinates, and their calculated coordinates in the sidebar. Edit the initial coordinates there and press **Update starting estimates** to adjust the solver's starting positions.
