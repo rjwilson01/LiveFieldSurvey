@@ -125,15 +125,6 @@ def export_survey(df_trees, df_measurements, dataset_info, trees, measurements, 
     dataset_slug = storage.safe_filename(dataset_info["name"])
     serial = int(dataset_info["serial"])
     st.download_button(
-        "Download complete dataset (ZIP)",
-        data=build_dataset_bundle(dataset_info, trees, measurements),
-        file_name=f"{dataset_slug}-{serial:03d}.zip",
-        mime="application/zip",
-        key="download_dataset_bundle",
-        on_click=on_download,
-        help="Includes the dataset identity, all tree estimates, and every directed measurement for later upload.",
-    )
-    st.download_button(
         "Download trees and measurements CSV",
         data=df_trees.to_csv(index=False).encode("utf-8-sig"),
         file_name=f"{dataset_slug}-{serial:03d}-tree_survey.csv",

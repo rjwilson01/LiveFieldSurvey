@@ -13,11 +13,11 @@ streamlit run app.py
 ## Field workflow
 
 1. Tree 1 is shown at the bottom-left origin `(0, 0)`. Tree 2 is above it on the positive Y axis. Record a measurement between them to establish the network scale and baseline.
-2. Add trees from the Tree management section. Tap a grid point on the map to place the selected tree's rough initial position; tap an existing tree to load its ID and estimate for updating or deleting. Estimates are saved as whole millimetres and remain visible when adjusted positions move.
+2. Add trees from Tree management in the sidebar. Select an existing tree or the next available ID, tap a grid point to set its starting estimate, then press Add or Update. Tree 1 and Tree 2 are protected anchors. Use the map toggle to show or hide initial estimates.
 3. Record measured distances in millimetres. The live map draws each measured link and recalculates the network.
 4. Review amber trees for missing links or a disconnected network. Three or more links and a path to the anchor network are used as a practical field indicator that a tree has enough ties.
 5. Review distance residual warnings and large shifts from saved estimates. Both alert thresholds can be changed in the sidebar. Measurement distances can be edited or deleted.
-6. Download the combined tree and measurement CSV, or a separate measurement ledger.
+6. Download the complete dataset ZIP from the Dataset section in the sidebar for backup and restore. Download the combined tree and measurement CSV, or a separate measurement ledger, from Export survey.
 
 ## Dataset backup and replacement
 

@@ -49,6 +49,16 @@ with st.sidebar:
         st.error("Not downloaded · changes need a backup")
     else:
         st.success("Download requested")
+    st.download_button(
+        "Download complete dataset (ZIP)",
+        data=exporter.build_dataset_bundle(dataset_info, trees, measurements),
+        file_name=f"{storage.safe_filename(dataset_info['name'])}-{int(dataset_info['serial']):03d}.zip",
+        mime="application/zip",
+        key="download_dataset_bundle",
+        on_click=mark_dataset_downloaded,
+        help="Backup for restoring this survey, including tree estimates and measurements.",
+        use_container_width=True,
+    )
     with st.form(f"dataset_name_form_{dataset_info['serial']}_{storage.safe_filename(dataset_info['name'])}"):
         dataset_name = st.text_input("Dataset name", value=dataset_info["name"])
         save_dataset_name = st.form_submit_button("Save name")
@@ -93,11 +103,19 @@ with st.sidebar:
         st.session_state["tree_editor_values"] = {"id": int(dataset_info.get("next_tree_id", max(tree_ids, default=0) + 1)), "x": 0, "y": 0}
     tree_form_revision = st.session_state.get("tree_form_revision", 0)
     editor_values = st.session_state["tree_editor_values"]
-    tree_id = int(st.number_input("Tree ID", min_value=1, step=1, value=int(editor_values["id"]), key=f"tree_id_{tree_form_revision}"))
-    tree_exists = tree_id in trees
-    current_x, current_y = trees.get(tree_id, (0, 0))
-    st.session_state["tree_editor_values"] = {"id": tree_id, "x": int(current_x), "y": int(current_y)}
     next_tree_id = max(int(dataset_info.get("next_tree_id", 3)), max(tree_ids, default=2) + 1)
+    valid_tree_choices = sorted(set(tree_ids) | {next_tree_id})
+    selected_tree_id = int(editor_values["id"])
+    if selected_tree_id not in valid_tree_choices:
+        selected_tree_id = next_tree_id
+    tree_id = int(st.selectbox("Tree ID", valid_tree_choices, index=valid_tree_choices.index(selected_tree_id), key=f"tree_id_{tree_form_revision}"))
+    tree_exists = tree_id in trees
+    editor_values = st.session_state.get("tree_editor_values", {})
+    if int(editor_values.get("id", -1)) == tree_id and editor_values.get("pending_map_pick"):
+        current_x, current_y = int(editor_values["x"]), int(editor_values["y"])
+    else:
+        current_x, current_y = trees.get(tree_id, (0, 0))
+    st.session_state["tree_editor_values"] = {"id": tree_id, "x": int(current_x), "y": int(current_y)}
     tree_form_key = f"tree_management_{tree_form_revision}_{tree_id}"
     with st.form(tree_form_key):
         left, right = st.columns(2)
@@ -105,8 +123,11 @@ with st.sidebar:
             estimate_x = st.number_input("Initial X", min_value=0, value=int(current_x), step=100, disabled=tree_id in (1, 2), key=f"tree_x_{tree_form_revision}_{tree_id}")
         with right:
             estimate_y = st.number_input("Initial Y", min_value=0, value=int(current_y), step=100, disabled=tree_id == 1, key=f"tree_y_{tree_form_revision}_{tree_id}")
-        save_tree = st.form_submit_button("Update tree" if tree_exists else "Add tree", disabled=tree_id == 1 or (not tree_exists and tree_id < next_tree_id))
-        delete_tree = st.form_submit_button("Delete tree", disabled=not tree_exists or tree_id in (1, 2))
+        add_col, delete_col = st.columns(2)
+        with add_col:
+            save_tree = st.form_submit_button("Update tree" if tree_exists else "Add tree", disabled=tree_id == 1, use_container_width=True)
+        with delete_col:
+            delete_tree = st.form_submit_button("Delete tree", disabled=not tree_exists or tree_id in (1, 2), use_container_width=True)
 
     if save_tree:
         if tree_exists:
@@ -146,21 +167,12 @@ with st.sidebar:
             st.session_state["tree_editor_values"] = {"id": next_tree_id, "x": 0, "y": 0}
             st.session_state["tree_form_revision"] = tree_form_revision + 1
             st.rerun()
-    if tree_id == 1:
-        tree_caption = "Tree 1 is the origin and cannot be moved or deleted."
-    elif tree_id == 2:
-        tree_caption = "Tree 2 is the Y-axis anchor. Its X is fixed at 0; update its starting Y estimate or add a baseline measurement."
-    elif tree_exists:
-        tree_caption = f"Tree {tree_id} is selected. Update its integer starting coordinates or delete it. Deleted IDs are retired."
-    else:
-        tree_caption = f"Tree {tree_id} is new. Add it, then tap the map to set its initial position. The next unused ID is {next_tree_id}."
-    st.caption(tree_caption)
     if tree_id in coords:
         adjusted_x, adjusted_y = coords[tree_id]
-        location_label = "Calculated location" if solver_info and solver_info["success"] else "Current map position"
-        st.caption(f"{location_label} · X {int(round(adjusted_x))} mm · Y {int(round(adjusted_y))} mm (read only)")
-    else:
-        st.caption("Calculated location will appear after the network can be adjusted.")
+        location_label = "Calculated location" if solver_info and solver_info["success"] else "Adjusted location so far"
+        st.text_input(location_label, value=f"X {int(round(adjusted_x))} · Y {int(round(adjusted_y))} mm", disabled=True, key=f"tree_location_{tree_form_revision}_{tree_id}")
+    elif tree_exists:
+        st.text_input("Calculated location", value="Not available yet", disabled=True, key=f"tree_location_{tree_form_revision}_{tree_id}")
 
     st.divider()
     st.header("Measurement")
@@ -181,20 +193,28 @@ with st.sidebar:
     to_default = measurement_values.get("to", tree_ids[1] if len(tree_ids) > 1 else from_default)
     if to_default not in tree_ids or to_default == from_default:
         to_default = next((tree for tree in tree_ids if tree != from_default), from_default)
-    st.caption(f"Next map pick updates **{st.session_state['measurement_next_field'].title()}**. Re-picking either selected endpoint keeps it and directs the next pick to the other field.")
     if selected_measurement_index is not None:
         st.caption(f"Editing record #{selected_measurement_index + 1}. Use Cancel row edit to return to adding.")
     with st.form(f"measurement_editor_{measurement_revision}"):
         left, right = st.columns(2)
         with left:
-            from_tree = st.selectbox("From tree", tree_ids, index=tree_ids.index(from_default), key=f"measurement_from_{measurement_revision}")
+            from_active = st.session_state["measurement_next_field"] == "from"
+            with st.container(border=from_active):
+                if from_active: st.markdown("**NEXT MAP PICK**")
+                from_tree = st.selectbox("From tree", tree_ids, index=tree_ids.index(from_default), key=f"measurement_from_{measurement_revision}")
         with right:
             current_to_default = to_default if to_default != from_tree else next((tree for tree in tree_ids if tree != from_tree), from_tree)
-            to_tree = st.selectbox("To tree", tree_ids, index=tree_ids.index(current_to_default), key=f"measurement_to_{measurement_revision}")
+            to_active = st.session_state["measurement_next_field"] == "to"
+            with st.container(border=to_active):
+                if to_active: st.markdown("**NEXT MAP PICK**")
+                to_tree = st.selectbox("To tree", tree_ids, index=tree_ids.index(current_to_default), key=f"measurement_to_{measurement_revision}")
         distance = st.number_input("Distance (mm)", min_value=1, value=int(measurement_values.get("distance", 1000)), step=1, key=f"measurement_distance_{measurement_revision}")
-        save_measurement = st.form_submit_button("Update measurement" if selected_measurement_index is not None else "Add measurement", disabled=len(tree_ids) < 2)
+        save_col, delete_col = st.columns(2)
+        with save_col:
+            save_measurement = st.form_submit_button("Update measurement" if selected_measurement_index is not None else "Add measurement", disabled=len(tree_ids) < 2, use_container_width=True)
         if selected_measurement_index is not None:
-            delete_measurement = st.form_submit_button("Delete measurement")
+            with delete_col:
+                delete_measurement = st.form_submit_button("Delete measurement", use_container_width=True)
             cancel_measurement_edit = st.form_submit_button("Cancel row edit")
         else:
             delete_measurement = False
@@ -245,7 +265,8 @@ with st.sidebar:
 
 st.subheader("Live map")
 if not solver_info or not solver_info["baseline_measured"]:
-    st.info("Measure between Tree 1 and Tree 2 to set the scale and lock Tree 2 onto the positive Y axis. Tree 1 is fixed at (0, 0).")
+    st.caption("Baseline guidance is on the Help page.")
+show_estimates = st.checkbox("Show initial estimates", value=st.session_state.get("show_initial_estimates", False), key="show_initial_estimates")
 
 degree = {t: 0 for t in tree_ids}
 adjacency = {t: set() for t in tree_ids}
@@ -273,10 +294,10 @@ if coords:
     max_y = max(1000, max(p[1] for p in extent_points) + 1000)
     x_padding = max(100, int(max_x * 0.03))
     y_padding = max(100, int(max_y * 0.03))
-    grid_x = np.linspace(0, max_x, 31)
-    grid_y = np.linspace(0, max_y, 31)
+    grid_x = np.linspace(0, max_x, 25)
+    grid_y = np.linspace(0, max_y, 25)
     tap_points = [(float(x), float(y)) for x in grid_x for y in grid_y]
-    fig.add_trace(go.Scatter(x=[p[0] for p in tap_points], y=[p[1] for p in tap_points], customdata=tap_points, mode="markers", marker={"size": 14, "color": "rgba(100,116,139,0.08)"}, hoverinfo="skip", showlegend=False, name="Tap to place estimate"))
+    fig.add_trace(go.Scatter(x=[p[0] for p in tap_points], y=[p[1] for p in tap_points], customdata=tap_points, mode="markers", marker={"size": 18, "color": "rgba(100,116,139,0.20)"}, hovertemplate="Tap to set starting estimate<br>X %{x:.0f} mm<br>Y %{y:.0f} mm<extra></extra>", showlegend=False, name="Tap to place estimate"))
     for measurement_index, (a, b, d) in enumerate(measurements):
         if a in coords and b in coords:
             xa, ya = coords[a]
@@ -285,30 +306,28 @@ if coords:
             line_color = "#f97316" if st.session_state.get("highlight_pair") == tuple(sorted((a, b))) else "#9aa4b2"
             fig.add_trace(go.Scatter(x=[xa, midpoint_x, xb], y=[ya, midpoint_y, yb], mode="lines+markers", line={"color": line_color, "width": 3 if line_color == "#f97316" else 2}, marker={"size": [1, 18, 1], "color": [line_color, "rgba(100,116,139,0.015)", line_color]}, customdata=[[measurement_index, a, b]] * 3, hovertemplate=f"{a} → {b}: {d:.0f} mm<extra></extra>", showlegend=False))
 
-    # Keep original estimates visible as small open circles; calculated positions
-    # are the filled markers and are the ones connected by tape measurements.
-    fig.add_trace(go.Scatter(x=[trees[t][0] for t in tree_ids], y=[trees[t][1] for t in tree_ids], mode="markers", name="Initial estimates", marker={"symbol": "circle-open", "size": 14, "color": "#64748b", "line": {"width": 2}}, text=[str(t) for t in tree_ids], hovertemplate="Initial estimate · Tree %{text}<br>X %{x:.0f} mm<br>Y %{y:.0f} mm<extra></extra>"))
+    # Optional estimates are hidden by default so they cannot obscure tree taps.
+    fig.add_trace(go.Scatter(x=[trees[t][0] for t in tree_ids], y=[trees[t][1] for t in tree_ids], mode="markers", name="Initial estimates", visible=show_estimates, showlegend=False, marker={"symbol": "circle-open", "size": 12, "color": "#64748b", "line": {"width": 2}}, text=[str(t) for t in tree_ids], hovertemplate="Initial estimate · Tree %{text}<br>X %{x:.0f} mm<br>Y %{y:.0f} mm<extra></extra>"))
     colors = ["#f59e0b" if t in underconstrained else ("#2563eb" if t in (1, 2) else "#15803d") for t in tree_ids]
     fig.add_trace(go.Scatter(x=[coords[t][0] for t in tree_ids], y=[coords[t][1] for t in tree_ids], mode="markers+text", name="Adjusted positions", text=[str(t) for t in tree_ids], textposition="top center", marker={"size": 15, "color": colors, "line": {"color": "white", "width": 1}}, customdata=[[degree[t], t in underconstrained, t] for t in tree_ids], hovertemplate="Tree %{text}<br>X %{x:.0f} mm<br>Y %{y:.0f} mm<br>Links: %{customdata[0]}<extra></extra>"))
 fig.update_layout(height=620, margin={"l": 10, "r": 10, "t": 20, "b": 10}, xaxis={"title": "X (mm)", "range": [-x_padding if coords else -100, max_x if coords else 1000], "zeroline": True, "scaleanchor": "y", "scaleratio": 1, "constrain": "domain", "constraintoward": "left"}, yaxis={"title": "Y (mm)", "range": [-y_padding if coords else -100, max_y if coords else 1000], "zeroline": True, "constrain": "domain", "constraintoward": "bottom"}, legend={"orientation": "h", "y": 1.02})
 map_revision = st.session_state.get("map_revision", 0)
-map_event = st.plotly_chart(fig, use_container_width=True, key=f"survey_map_{map_revision}", on_select="rerun", selection_mode="points")
+fig.update_layout(autosize=True, uirevision="survey-map-view")
+map_event = st.plotly_chart(fig, use_container_width=True, key=f"survey_map_{map_revision}", on_select="rerun", selection_mode="points", config={"responsive": True, "scrollZoom": False})
 try:
     selected_points = map_event.selection.points
 except (AttributeError, TypeError):
     selected_points = []
-for point in selected_points:
+for point in sorted(selected_points, key=lambda selected: selected.get("curve_number") == 0):
     curve_number = point.get("curve_number")
-    if curve_number == 0 and tree_ids:
+    if curve_number == 0:
         tap_x, tap_y = point.get("customdata", (point.get("x"), point.get("y")))
         selected_estimate_tree = int(st.session_state["tree_editor_values"]["id"])
-        if selected_estimate_tree in trees and selected_estimate_tree != 1:
+        if selected_estimate_tree != 1:
             tap_x, tap_y = int(round(tap_x)), int(round(tap_y))
             if selected_estimate_tree == 2:
                 tap_x = 0
-            trees[selected_estimate_tree] = (tap_x, tap_y)
-            persist_trees()
-            st.session_state["tree_editor_values"] = {"id": selected_estimate_tree, "x": tap_x, "y": tap_y}
+            st.session_state["tree_editor_values"] = {"id": selected_estimate_tree, "x": tap_x, "y": tap_y, "pending_map_pick": True}
             st.session_state["tree_form_revision"] = st.session_state.get("tree_form_revision", 0) + 1
             st.session_state["map_revision"] = map_revision + 1
             st.rerun()
@@ -353,8 +372,7 @@ for point in selected_points:
         st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
         st.session_state["map_revision"] = map_revision + 1
         st.rerun()
-st.caption("Tree 1 is at the lower-left origin, with Tree 2 above it on the Y axis. Gray lines show measurements; amber trees need more links or a connection to the anchored network. Open circles show saved starting estimates.")
-st.caption("Tap a grid point to place the selected initial estimate. Tree marker taps alternate between From and To; clicking an existing endpoint keeps it and sends the next new pick to the other field. Tap a measurement line to highlight its tree-pair records.")
+st.caption("Gray lines show measurements; amber trees need more links or a connection to the anchored network.")
 
 if solver_info and solver_info["success"]:
     moved = []
@@ -441,9 +459,11 @@ if measurements:
         if pair_changed or selection_changed or editor_values_changed:
             st.rerun()
 
-    st.caption("Measurements are grouped by tree pair; each From → To reading remains a separate record. Δ = adjusted minus measured, rounded to whole millimetres. Click a row to load it into the Measurement editor in the sidebar.")
 else:
     st.caption("No tape measurements recorded yet.")
+
+st.caption("Notes: Tree 1 is at the lower-left origin and Tree 2 is above it on the Y axis. Tap a grid point to set the selected tree's starting estimate; then Add or Update in the sidebar. Tree marker taps fill From and To. Tap a measurement line to highlight records for that tree pair.")
+st.caption("Measurements are grouped by tree pair; each From → To reading remains a separate record. Δ = adjusted minus measured, rounded to whole millimetres. Click a row to load it into the Measurement editor in the sidebar.")
 
 st.subheader("Export survey")
 exporter.export_survey(
