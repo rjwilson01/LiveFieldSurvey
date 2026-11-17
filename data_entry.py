@@ -282,9 +282,17 @@ with st.sidebar:
     def refresh_suggested_distance():
         picked_from = int(st.session_state[from_key])
         picked_to = int(st.session_state[to_key])
-        picked_distance = suggested_measurement_distance(picked_from, picked_to)
+        existing_index = next((index for index, (a, b, _) in enumerate(measurements) if a == picked_from and b == picked_to), None)
+        if existing_index is not None:
+            picked_distance = max(1, int(round(measurements[existing_index][2])))
+            st.session_state["selected_measurement_index"] = existing_index
+        else:
+            picked_distance = suggested_measurement_distance(picked_from, picked_to)
+            st.session_state["selected_measurement_index"] = None
+        st.session_state["highlight_pair"] = tuple(sorted((picked_from, picked_to))) if picked_from != picked_to else None
         st.session_state[distance_key] = picked_distance
         st.session_state["measurement_editor_values"] = {"from": picked_from, "to": picked_to, "distance": picked_distance}
+        st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
 
     left, right = st.columns(2)
     with left:
@@ -561,9 +569,13 @@ if measurements:
         },
         num_rows="fixed",
     )
-    selected_rows = [row for row, selected in enumerate(edited_table["Select"]) if bool(selected)]
-    new_selected_measurement = int(table_df.iloc[selected_rows[0]]["_record_id"]) if selected_rows else None
     old_selected_measurement = st.session_state.get("selected_measurement_index")
+    selected_rows = [row for row, selected in enumerate(edited_table["Select"]) if bool(selected)]
+    if len(selected_rows) > 1 and old_selected_measurement is not None:
+        newly_selected_rows = [row for row in selected_rows if int(table_df.iloc[row]["_record_id"]) != old_selected_measurement]
+        selected_rows = newly_selected_rows or selected_rows
+    new_selected_measurement = int(table_df.iloc[selected_rows[-1]]["_record_id"]) if selected_rows else None
+    multiple_selected = len([selected for selected in edited_table["Select"] if bool(selected)]) > 1
     selection_changed = new_selected_measurement != old_selected_measurement
     st.session_state["selected_measurement_index"] = new_selected_measurement
     if new_selected_measurement is not None:
@@ -602,7 +614,7 @@ if measurements:
             a, b, distance = measurements[new_selected_measurement]
             st.session_state["measurement_editor_values"] = {"from": a, "to": b, "distance": int(round(distance))}
         st.rerun()
-    if selection_changed or pair_changed:
+    if selection_changed or pair_changed or multiple_selected:
         st.session_state["measurement_table_revision"] = table_revision + 1
         st.rerun()
 
