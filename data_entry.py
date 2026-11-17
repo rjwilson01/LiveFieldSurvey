@@ -571,10 +571,21 @@ if measurements:
     )
     old_selected_measurement = st.session_state.get("selected_measurement_index")
     selected_rows = [row for row, selected in enumerate(edited_table["Select"]) if bool(selected)]
+    table_key = f"measurement_table_{table_revision}"
+    table_widget_state = st.session_state.get(table_key, {})
+    edited_cells = table_widget_state.get("edited_rows", {}) if hasattr(table_widget_state, "get") else {}
+    select_was_changed = any("Select" in cells for cells in edited_cells.values())
     if len(selected_rows) > 1 and old_selected_measurement is not None:
         newly_selected_rows = [row for row in selected_rows if int(table_df.iloc[row]["_record_id"]) != old_selected_measurement]
         selected_rows = newly_selected_rows or selected_rows
-    new_selected_measurement = int(table_df.iloc[selected_rows[-1]]["_record_id"]) if selected_rows else None
+    if selected_rows:
+        new_selected_measurement = int(table_df.iloc[selected_rows[-1]]["_record_id"])
+    elif select_was_changed:
+        new_selected_measurement = None
+    else:
+        # Pair selection in the sidebar is another way to choose the active
+        # record; an untouched table must not erase that selection.
+        new_selected_measurement = old_selected_measurement
     multiple_selected = len([selected for selected in edited_table["Select"] if bool(selected)]) > 1
     selection_changed = new_selected_measurement != old_selected_measurement
     st.session_state["selected_measurement_index"] = new_selected_measurement
