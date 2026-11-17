@@ -24,6 +24,22 @@ if duplicate_measurements_collapsed:
     measurements = [(a, b, distance) for (a, b), distance in directed_measurements.items()]
     storage.save_measurements(measurements)
     storage.mark_dataset_dirty()
+
+
+def sync_tree2_to_baseline():
+    baseline_readings = [distance for a, b, distance in measurements if {a, b} == {1, 2}]
+    if not baseline_readings or 2 not in trees:
+        return False
+    baseline_y = max(0, int(round(sum(baseline_readings) / len(baseline_readings))))
+    if trees[2] == (0, baseline_y):
+        return False
+    trees[2] = (0, baseline_y)
+    storage.save_trees(trees)
+    storage.mark_dataset_dirty()
+    return True
+
+
+sync_tree2_to_baseline()
 tree_ids = sorted(trees)
 
 def persist_trees():
@@ -32,6 +48,8 @@ def persist_trees():
 
 def persist_measurements():
     storage.save_measurements(measurements)
+    # The solver constrains Tree 2 to the mean measured baseline on +Y.
+    sync_tree2_to_baseline()
     storage.mark_dataset_dirty()
 
 def mark_dataset_downloaded():
@@ -175,12 +193,13 @@ with st.sidebar:
         current_x, current_y = 0, 0
     st.session_state["tree_editor_values"] = {"id": tree_id, "x": int(current_x), "y": int(current_y)}
     tree_form_key = f"tree_management_{tree_form_revision}_{tree_id}"
+    tree2_has_baseline = any({a, b} == {1, 2} for a, b, _ in measurements)
     with st.form(tree_form_key):
         left, right = st.columns(2)
         with left:
             estimate_x = st.number_input("Initial X", min_value=0, value=int(current_x), step=100, disabled=tree_id in (1, 2), key=f"tree_x_{tree_form_revision}_{tree_id}")
         with right:
-            estimate_y = st.number_input("Initial Y", min_value=0, value=int(current_y), step=100, disabled=tree_id == 1, key=f"tree_y_{tree_form_revision}_{tree_id}")
+            estimate_y = st.number_input("Initial Y", min_value=0, value=int(current_y), step=100, disabled=tree_id == 1 or (tree_id == 2 and tree2_has_baseline), key=f"tree_y_{tree_form_revision}_{tree_id}")
         add_col, delete_col = st.columns(2)
         with add_col:
             save_tree = st.form_submit_button("Update tree" if tree_exists else "Add tree", disabled=tree_id == 1, width="stretch")
