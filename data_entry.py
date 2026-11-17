@@ -54,10 +54,10 @@ with st.sidebar:
         data=exporter.build_dataset_bundle(dataset_info, trees, measurements),
         file_name=f"{storage.safe_filename(dataset_info['name'])}-{int(dataset_info['serial']):03d}.zip",
         mime="application/zip",
-        key="download_dataset_bundle",
+        key="sidebar_dataset_backup_download",
         on_click=mark_dataset_downloaded,
         help="Backup for restoring this survey, including tree estimates and measurements.",
-        use_container_width=True,
+        width="stretch",
     )
     with st.form(f"dataset_name_form_{dataset_info['serial']}_{storage.safe_filename(dataset_info['name'])}"):
         dataset_name = st.text_input("Dataset name", value=dataset_info["name"])
@@ -125,9 +125,9 @@ with st.sidebar:
             estimate_y = st.number_input("Initial Y", min_value=0, value=int(current_y), step=100, disabled=tree_id == 1, key=f"tree_y_{tree_form_revision}_{tree_id}")
         add_col, delete_col = st.columns(2)
         with add_col:
-            save_tree = st.form_submit_button("Update tree" if tree_exists else "Add tree", disabled=tree_id == 1, use_container_width=True)
+            save_tree = st.form_submit_button("Update tree" if tree_exists else "Add tree", disabled=tree_id == 1, width="stretch")
         with delete_col:
-            delete_tree = st.form_submit_button("Delete tree", disabled=not tree_exists or tree_id in (1, 2), use_container_width=True)
+            delete_tree = st.form_submit_button("Delete tree", disabled=not tree_exists or tree_id in (1, 2), width="stretch")
 
     if save_tree:
         if tree_exists:
@@ -199,22 +199,20 @@ with st.sidebar:
         left, right = st.columns(2)
         with left:
             from_active = st.session_state["measurement_next_field"] == "from"
-            with st.container(border=from_active):
-                if from_active: st.markdown("**NEXT MAP PICK**")
+            with st.container(border=True, key="from-picker"):
                 from_tree = st.selectbox("From tree", tree_ids, index=tree_ids.index(from_default), key=f"measurement_from_{measurement_revision}")
         with right:
             current_to_default = to_default if to_default != from_tree else next((tree for tree in tree_ids if tree != from_tree), from_tree)
             to_active = st.session_state["measurement_next_field"] == "to"
-            with st.container(border=to_active):
-                if to_active: st.markdown("**NEXT MAP PICK**")
+            with st.container(border=True, key="to-picker"):
                 to_tree = st.selectbox("To tree", tree_ids, index=tree_ids.index(current_to_default), key=f"measurement_to_{measurement_revision}")
         distance = st.number_input("Distance (mm)", min_value=1, value=int(measurement_values.get("distance", 1000)), step=1, key=f"measurement_distance_{measurement_revision}")
         save_col, delete_col = st.columns(2)
         with save_col:
-            save_measurement = st.form_submit_button("Update measurement" if selected_measurement_index is not None else "Add measurement", disabled=len(tree_ids) < 2, use_container_width=True)
+            save_measurement = st.form_submit_button("Update measurement" if selected_measurement_index is not None else "Add measurement", disabled=len(tree_ids) < 2, width="stretch")
         if selected_measurement_index is not None:
             with delete_col:
-                delete_measurement = st.form_submit_button("Delete measurement", use_container_width=True)
+                delete_measurement = st.form_submit_button("Delete measurement", width="stretch")
             cancel_measurement_edit = st.form_submit_button("Cancel row edit")
         else:
             delete_measurement = False
@@ -313,7 +311,9 @@ if coords:
 fig.update_layout(height=620, margin={"l": 10, "r": 10, "t": 20, "b": 10}, xaxis={"title": "X (mm)", "range": [-x_padding if coords else -100, max_x if coords else 1000], "zeroline": True, "scaleanchor": "y", "scaleratio": 1, "constrain": "domain", "constraintoward": "left"}, yaxis={"title": "Y (mm)", "range": [-y_padding if coords else -100, max_y if coords else 1000], "zeroline": True, "constrain": "domain", "constraintoward": "bottom"}, legend={"orientation": "h", "y": 1.02})
 map_revision = st.session_state.get("map_revision", 0)
 fig.update_layout(autosize=True, uirevision="survey-map-view")
-map_event = st.plotly_chart(fig, use_container_width=True, key=f"survey_map_{map_revision}", on_select="rerun", selection_mode="points", config={"responsive": True, "scrollZoom": False})
+active_picker = "from-picker" if st.session_state["measurement_next_field"] == "from" else "to-picker"
+st.markdown(f"<style>.st-key-{active_picker} [data-testid='stVerticalBlockBorderWrapper'] {{ border: 3px solid #16a34a !important; border-radius: 0.75rem; }}</style>", unsafe_allow_html=True)
+map_event = st.plotly_chart(fig, key=f"survey_map_{map_revision}", on_select="rerun", selection_mode="points", config={"responsive": True, "scrollZoom": False})
 try:
     selected_points = map_event.selection.points
 except (AttributeError, TypeError):
@@ -427,7 +427,7 @@ if measurements:
 
     table_event = st.dataframe(
         visible_df.style.apply(row_style, axis=1),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         key=f"measurement_table_{st.session_state.get('measurement_table_revision', 0)}",
         on_select="rerun",
