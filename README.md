@@ -19,6 +19,10 @@ streamlit run app.py
 5. Review distance residual warnings and large shifts from saved estimates. Both alert thresholds can be changed in the sidebar. Measurement distances can be edited or deleted.
 6. Download the combined tree and measurement CSV, or a separate measurement ledger.
 
+## Dataset backup and replacement
+
+The Dataset panel assigns an ID in the form `Name-001`. Each confirmed ZIP upload receives the next serial number and replaces the active trees and measurements. The ZIP includes a manifest plus `trees.csv` and `measurements.csv`; those two CSVs retain starting estimates and all directed measurement records. The app validates the archive before showing a replacement confirmation. The Dataset panel marks the active set **Not downloaded** whenever its data or name changes and clears that flag when the ZIP download is requested. Download the ZIP before replacing a set that matters to you.
+
 Repeated measurements are kept as separate observations, including reverse-direction readings such as `2 → 4` and `4 → 2`; the review table groups them under the same unordered tree pair while preserving the From/To direction. Its short headings are `Meas`, `Adj`, and `Δ`; residuals are rounded to whole millimetres. Click a table row to edit or delete that observation. On the map, tap two adjusted tree markers to prefill a new measurement, or tap a measurement line to highlight all observations for that pair. Tree 2 can be selected and its Y estimate edited; its X coordinate stays fixed at zero.
 
-Trees 1 and 2 are protected anchors. Other trees and their associated measurements can be deleted from the sidebar. Survey data is stored in `active_trees.csv` and `survey_data.csv` in the app's working directory; back these files up when hosting on an ephemeral service.
+Trees 1 and 2 are protected anchors. Other trees and their associated measurements can be deleted from the sidebar. Survey data and identity are stored in `active_trees.csv`, `survey_data.csv`, `dataset_info.json`, and `dataset_serial.json` in the app's working directory; Streamlit Cloud local files can be ephemeral, so download the ZIP backup before a reboot or any operation that might reset the app's storage.

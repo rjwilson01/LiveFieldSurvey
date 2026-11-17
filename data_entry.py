@@ -23,12 +23,63 @@ if "pending_measurement_trees" in st.session_state:
 
 def persist_trees():
     storage.save_trees(trees)
+    storage.mark_dataset_dirty()
 
 def persist_measurements():
     storage.save_measurements(measurements)
+    storage.mark_dataset_dirty()
+
+def mark_dataset_downloaded():
+    storage.mark_dataset_downloaded()
+
+
+dataset_info = storage.load_dataset_info()
 
 
 with st.sidebar:
+    st.header("Dataset")
+    st.write(f"**{dataset_info['dataset_id']}**")
+    if dataset_info.get("not_downloaded", True):
+        st.error("Not downloaded · changes need a backup")
+    else:
+        st.success("Download requested")
+    with st.form(f"dataset_name_form_{dataset_info['serial']}_{storage.safe_filename(dataset_info['name'])}"):
+        dataset_name = st.text_input("Dataset name", value=dataset_info["name"])
+        save_dataset_name = st.form_submit_button("Save name")
+    if save_dataset_name:
+        storage.rename_dataset(dataset_name)
+        st.rerun()
+
+    upload_revision = st.session_state.get("dataset_upload_revision", 0)
+    with st.expander("Upload a saved dataset"):
+        uploaded_file = st.file_uploader("Dataset ZIP", type=["zip"], key=f"dataset_upload_{upload_revision}")
+        if uploaded_file is not None:
+            import hashlib
+            upload_bytes = uploaded_file.getvalue()
+            try:
+                pending_upload = exporter.parse_dataset_bundle(upload_bytes)
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.caption(f"File contains {pending_upload['source_id']} · {len(pending_upload['trees'])} trees · {len(pending_upload['measurements'])} measurements.")
+                current_status = "has un-downloaded changes" if dataset_info.get("not_downloaded", True) else "has a requested backup"
+                st.warning(f"Uploading will replace **{dataset_info['dataset_id']}** ({current_status}) and all of its current trees and measurements. The uploaded dataset will be assigned a new serial number.")
+                upload_token = hashlib.sha256(upload_bytes).hexdigest()[:12]
+                confirmed = st.checkbox("I understand this replaces the active dataset", key=f"confirm_upload_{upload_token}")
+                if st.button("Replace active dataset", type="primary", disabled=not confirmed, key=f"replace_dataset_{upload_token}"):
+                    source_serial = pending_upload["source_serial"]
+                    minimum_serial = source_serial + 1 if source_serial is not None else None
+                    storage.replace_dataset(pending_upload["name"], pending_upload["trees"], pending_upload["measurements"], minimum_serial=minimum_serial)
+                    st.session_state["tree_editor_values"] = {"id": max(pending_upload["trees"], default=0) + 1, "x": 0, "y": 0}
+                    st.session_state["tree_form_revision"] = st.session_state.get("tree_form_revision", 0) + 1
+                    st.session_state["dataset_upload_revision"] = upload_revision + 1
+                    st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
+                    st.session_state["selected_measurement_index"] = None
+                    st.session_state["pending_measurement_trees"] = []
+                    st.session_state["map_revision"] = st.session_state.get("map_revision", 0) + 1
+                    st.rerun()
+
+    st.divider()
     st.header("Tree management")
     if "tree_editor_values" not in st.session_state:
         st.session_state["tree_editor_values"] = {"id": max(tree_ids, default=0) + 1, "x": 0, "y": 0}
@@ -308,4 +359,11 @@ else:
     st.caption("No tape measurements recorded yet.")
 
 st.subheader("Export survey")
-exporter.export_survey(pd.DataFrame([{"Tree": t, "Initial_X_mm": trees[t][0], "Initial_Y_mm": trees[t][1], "Adjusted_X_mm": coords.get(t, (float("nan"), float("nan")))[0], "Adjusted_Y_mm": coords.get(t, (float("nan"), float("nan")))[1], "Links": degree[t], "Needs_more_measurements": t in underconstrained} for t in tree_ids]), pd.DataFrame(residual_rows if solver_info and solver_info["success"] else [{"From": a, "To": b, "Measured_mm": d} for a, b, d in measurements]))
+exporter.export_survey(
+    pd.DataFrame([{"Tree": t, "Initial_X_mm": trees[t][0], "Initial_Y_mm": trees[t][1], "Adjusted_X_mm": coords.get(t, (float("nan"), float("nan")))[0], "Adjusted_Y_mm": coords.get(t, (float("nan"), float("nan")))[1], "Links": degree[t], "Needs_more_measurements": t in underconstrained} for t in tree_ids]),
+    pd.DataFrame(residual_rows if solver_info and solver_info["success"] else [{"From": a, "To": b, "Measured_mm": d} for a, b, d in measurements]),
+    dataset_info,
+    trees,
+    measurements,
+    on_download=mark_dataset_downloaded,
+)
