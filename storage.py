@@ -34,20 +34,30 @@ def init_dataset_info():
     if not DATASET_FILE.exists():
         existing_registry = json.loads(SERIAL_FILE.read_text(encoding="utf-8")) if SERIAL_FILE.exists() else {}
         initial_serial = max(1, int(existing_registry.get("next_serial", 1)))
+        tree_frame = pd.read_csv(TREES_FILE)
+        max_tree_id = int(pd.to_numeric(tree_frame["tree"], errors="coerce").max()) if not tree_frame.empty else 2
         info = {
             "name": "Field Survey",
             "serial": initial_serial,
             "dataset_id": _dataset_id("Field Survey", initial_serial),
+            "next_tree_id": max(3, max_tree_id + 1),
             "not_downloaded": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         _write_json(DATASET_FILE, info)
     info = json.loads(DATASET_FILE.read_text(encoding="utf-8"))
+    if "next_tree_id" not in info:
+        tree_frame = pd.read_csv(TREES_FILE)
+        max_tree_id = int(pd.to_numeric(tree_frame["tree"], errors="coerce").max()) if not tree_frame.empty else 2
+        info["next_tree_id"] = max(3, max_tree_id + 1)
+    else:
+        info["next_tree_id"] = max(3, int(info["next_tree_id"]))
     next_serial = int(info.get("serial", 0)) + 1
     if SERIAL_FILE.exists():
         registry = json.loads(SERIAL_FILE.read_text(encoding="utf-8"))
         next_serial = max(next_serial, int(registry.get("next_serial", 1)))
     _write_json(SERIAL_FILE, {"next_serial": next_serial})
+    _write_json(DATASET_FILE, info)
     return info
 
 
@@ -85,7 +95,14 @@ def mark_dataset_downloaded():
     save_dataset_info(info)
 
 
-def replace_dataset(name, trees_dict, measurements, minimum_serial=None):
+def mark_tree_id_used(tree_id):
+    info = load_dataset_info()
+    info["next_tree_id"] = max(int(info.get("next_tree_id", 3)), int(tree_id) + 1)
+    info["not_downloaded"] = True
+    save_dataset_info(info)
+
+
+def replace_dataset(name, trees_dict, measurements, minimum_serial=None, next_tree_id=None):
     """Replace the active survey and assign a fresh, monotonically increasing serial."""
     trees_dict = dict(trees_dict)
     if 1 not in trees_dict or 2 not in trees_dict:
@@ -99,6 +116,7 @@ def replace_dataset(name, trees_dict, measurements, minimum_serial=None):
     info = {
         "name": str(name).strip() or "Imported Survey",
         "serial": serial,
+        "next_tree_id": max(max(trees_dict) + 1, int(next_tree_id or 3)),
         "not_downloaded": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "imported_at": datetime.now(timezone.utc).isoformat(),
@@ -115,7 +133,16 @@ def safe_filename(text):
 def load_trees():
     init_files()
     frame = pd.read_csv(TREES_FILE)
-    return {int(row.tree): (int(round(float(row.x))), int(round(float(row.y)))) for row in frame.itertuples()}
+    trees = {}
+    for row in frame.itertuples():
+        tree_id = int(row.tree)
+        x, y = max(0, int(round(float(row.x)))), max(0, int(round(float(row.y))))
+        if tree_id == 1:
+            x, y = 0, 0
+        elif tree_id == 2:
+            x = 0
+        trees[tree_id] = (x, y)
+    return trees
 
 
 def save_trees(trees_dict):

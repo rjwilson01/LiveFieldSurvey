@@ -18,6 +18,7 @@ def build_dataset_bundle(dataset_info, trees, measurements):
         "dataset_name": dataset_info["name"],
         "dataset_id": dataset_info["dataset_id"],
         "serial": int(dataset_info["serial"]),
+        "next_tree_id": int(dataset_info.get("next_tree_id", max(trees, default=2) + 1)),
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "distance_unit": "mm",
         "coordinate_unit": "mm",
@@ -76,7 +77,7 @@ def parse_dataset_bundle(upload_bytes):
             raise ValueError("Tree IDs and coordinates must be numeric.") from exc
         if not tree_number.is_integer() or tree_id < 1 or not math.isfinite(x) or not math.isfinite(y):
             raise ValueError("Tree IDs must be positive and coordinates must be finite.")
-        trees[tree_id] = (int(round(x)), int(round(y)))
+        trees[tree_id] = (max(0, int(round(x))), max(0, int(round(y))))
     if 1 not in trees or 2 not in trees:
         raise ValueError("The uploaded dataset must include anchor trees 1 and 2.")
     trees[1] = (0, 0)
@@ -105,10 +106,16 @@ def parse_dataset_bundle(upload_bytes):
             raise ValueError("The manifest serial must be a positive integer.") from exc
         if source_serial < 1:
             raise ValueError("The manifest serial must be a positive integer.")
+    try:
+        source_next_tree_id = int(manifest.get("next_tree_id", max(trees) + 1))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("The manifest next_tree_id must be a positive integer.") from exc
+    source_next_tree_id = max(max(trees) + 1, 3, source_next_tree_id)
     return {
         "name": name,
         "source_id": str(manifest.get("dataset_id", "Unknown dataset")),
         "source_serial": source_serial,
+        "next_tree_id": source_next_tree_id,
         "trees": trees,
         "measurements": measurements,
     }
