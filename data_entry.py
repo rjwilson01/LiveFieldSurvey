@@ -16,9 +16,15 @@ st.caption("Record tree-to-tree tape distances and adjust the map with least squ
 storage.init_files()
 trees = storage.load_trees()
 measurements = storage.load_measurements(trees)
+directed_measurements = {}
+for a, b, distance in measurements:
+    directed_measurements[(a, b)] = distance
+duplicate_measurements_collapsed = len(measurements) - len(directed_measurements)
+if duplicate_measurements_collapsed:
+    measurements = [(a, b, distance) for (a, b), distance in directed_measurements.items()]
+    storage.save_measurements(measurements)
+    storage.mark_dataset_dirty()
 tree_ids = sorted(trees)
-if "pending_measurement_trees" in st.session_state:
-    st.session_state["pending_measurement_trees"] = [t for t in st.session_state["pending_measurement_trees"] if t in trees][:2]
 
 def persist_trees():
     storage.save_trees(trees)
@@ -33,6 +39,7 @@ def mark_dataset_downloaded():
 
 
 dataset_info = storage.load_dataset_info()
+coords, solver_info = solver.run_network_adjustment(trees, measurements)
 
 
 with st.sidebar:
@@ -74,9 +81,9 @@ with st.sidebar:
                     st.session_state["dataset_upload_revision"] = upload_revision + 1
                     st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
                     st.session_state["selected_measurement_index"] = None
-                    st.session_state["pending_measurement_trees"] = []
                     st.session_state["measurement_editor_values"] = {"from": 1, "to": 2, "distance": 1000}
                     st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
+                    st.session_state["measurement_next_field"] = "from"
                     st.session_state["map_revision"] = st.session_state.get("map_revision", 0) + 1
                     st.rerun()
 
@@ -132,10 +139,10 @@ with st.sidebar:
             persist_measurements()
             st.session_state["selected_measurement_index"] = None
             st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
-            st.session_state["pending_measurement_trees"] = []
             valid_tree_ids = sorted(trees)
             st.session_state["measurement_editor_values"] = {"from": valid_tree_ids[0], "to": valid_tree_ids[1], "distance": 1000}
             st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
+            st.session_state["measurement_next_field"] = "from"
             st.session_state["tree_editor_values"] = {"id": next_tree_id, "x": 0, "y": 0}
             st.session_state["tree_form_revision"] = tree_form_revision + 1
             st.rerun()
@@ -148,14 +155,25 @@ with st.sidebar:
     else:
         tree_caption = f"Tree {tree_id} is new. Add it, then tap the map to set its initial position. The next unused ID is {next_tree_id}."
     st.caption(tree_caption)
+    if tree_id in coords:
+        adjusted_x, adjusted_y = coords[tree_id]
+        location_label = "Calculated location" if solver_info and solver_info["success"] else "Current map position"
+        st.caption(f"{location_label} · X {int(round(adjusted_x))} mm · Y {int(round(adjusted_y))} mm (read only)")
+    else:
+        st.caption("Calculated location will appear after the network can be adjusted.")
 
     st.divider()
     st.header("Measurement")
     if "measurement_editor_values" not in st.session_state:
         first, second = (tree_ids[0], tree_ids[1]) if len(tree_ids) > 1 else (1, 2)
         st.session_state["measurement_editor_values"] = {"from": first, "to": second, "distance": 1000}
+    if "measurement_next_field" not in st.session_state:
+        st.session_state["measurement_next_field"] = "from"
     measurement_revision = st.session_state.get("measurement_form_revision", 0)
     selected_measurement_index = st.session_state.get("selected_measurement_index")
+    if selected_measurement_index is not None and not 0 <= selected_measurement_index < len(measurements):
+        selected_measurement_index = None
+        st.session_state["selected_measurement_index"] = None
     measurement_values = st.session_state["measurement_editor_values"]
     from_default = measurement_values.get("from", tree_ids[0] if tree_ids else 1)
     if from_default not in tree_ids:
@@ -163,12 +181,9 @@ with st.sidebar:
     to_default = measurement_values.get("to", tree_ids[1] if len(tree_ids) > 1 else from_default)
     if to_default not in tree_ids or to_default == from_default:
         to_default = next((tree for tree in tree_ids if tree != from_default), from_default)
-    pending = st.session_state.get("pending_measurement_trees", [])
-    if pending:
-        if len(pending) == 1:
-            st.info(f"From Tree {pending[0]} selected. Tap another tree or enter its ID.")
-        else:
-            st.info(f"Map selection: Tree {pending[0]} → Tree {pending[1]}. Enter the distance and save.")
+    st.caption(f"Next map pick updates **{st.session_state['measurement_next_field'].title()}**. Re-picking either selected endpoint keeps it and directs the next pick to the other field.")
+    if selected_measurement_index is not None:
+        st.caption(f"Editing record #{selected_measurement_index + 1}. Use Cancel row edit to return to adding.")
     with st.form(f"measurement_editor_{measurement_revision}"):
         left, right = st.columns(2)
         with left:
@@ -178,27 +193,40 @@ with st.sidebar:
             to_tree = st.selectbox("To tree", tree_ids, index=tree_ids.index(current_to_default), key=f"measurement_to_{measurement_revision}")
         distance = st.number_input("Distance (mm)", min_value=1, value=int(measurement_values.get("distance", 1000)), step=1, key=f"measurement_distance_{measurement_revision}")
         save_measurement = st.form_submit_button("Update measurement" if selected_measurement_index is not None else "Add measurement", disabled=len(tree_ids) < 2)
-        new_measurement = st.form_submit_button("New measurement", disabled=selected_measurement_index is None)
-        delete_measurement = st.form_submit_button("Delete measurement", disabled=selected_measurement_index is None)
+        if selected_measurement_index is not None:
+            delete_measurement = st.form_submit_button("Delete measurement")
+            cancel_measurement_edit = st.form_submit_button("Cancel row edit")
+        else:
+            delete_measurement = False
+            cancel_measurement_edit = False
 
     if save_measurement:
         if from_tree == to_tree:
             st.error("Choose two different trees.")
         else:
-            st.session_state["measurement_editor_values"] = {"from": int(from_tree), "to": int(to_tree), "distance": int(distance)}
             if selected_measurement_index is None:
-                measurements.append((int(from_tree), int(to_tree), float(distance)))
-                st.session_state["pending_measurement_trees"] = []
+                duplicate = any(a == int(from_tree) and b == int(to_tree) for a, b, _ in measurements)
+                if duplicate:
+                    st.error(f"Tree {from_tree} → Tree {to_tree} already has a measurement. Select its row to update it.")
+                else:
+                    measurements.append((int(from_tree), int(to_tree), float(distance)))
+                    persist_measurements()
             elif 0 <= selected_measurement_index < len(measurements):
-                measurements[selected_measurement_index] = (int(from_tree), int(to_tree), float(distance))
-            persist_measurements()
-            st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
-            st.session_state["measurement_form_revision"] = measurement_revision + 1
-            st.rerun()
-    if new_measurement:
+                duplicate = any(index != selected_measurement_index and a == int(from_tree) and b == int(to_tree) for index, (a, b, _) in enumerate(measurements))
+                if duplicate:
+                    st.error(f"Tree {from_tree} → Tree {to_tree} already has a measurement. Choose another direction or pair.")
+                else:
+                    measurements[selected_measurement_index] = (int(from_tree), int(to_tree), float(distance))
+                    persist_measurements()
+            if not duplicate:
+                st.session_state["measurement_editor_values"] = {"from": int(from_tree), "to": int(to_tree), "distance": int(distance)}
+                st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
+                st.session_state["measurement_form_revision"] = measurement_revision + 1
+                st.rerun()
+    if cancel_measurement_edit:
         st.session_state["selected_measurement_index"] = None
-        st.session_state["pending_measurement_trees"] = []
         st.session_state["measurement_form_revision"] = measurement_revision + 1
+        st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
         st.rerun()
     if delete_measurement:
         if selected_measurement_index is not None and 0 <= selected_measurement_index < len(measurements):
@@ -216,7 +244,6 @@ with st.sidebar:
 
 
 st.subheader("Live map")
-coords, solver_info = solver.run_network_adjustment(trees, measurements)
 if not solver_info or not solver_info["baseline_measured"]:
     st.info("Measure between Tree 1 and Tree 2 to set the scale and lock Tree 2 onto the positive Y axis. Tree 1 is fixed at (0, 0).")
 
@@ -244,6 +271,8 @@ if coords:
     extent_points = list(trees.values()) + list(coords.values())
     max_x = max(1000, max(p[0] for p in extent_points) + 1000)
     max_y = max(1000, max(p[1] for p in extent_points) + 1000)
+    x_padding = max(100, int(max_x * 0.03))
+    y_padding = max(100, int(max_y * 0.03))
     grid_x = np.linspace(0, max_x, 31)
     grid_y = np.linspace(0, max_y, 31)
     tap_points = [(float(x), float(y)) for x in grid_x for y in grid_y]
@@ -261,7 +290,7 @@ if coords:
     fig.add_trace(go.Scatter(x=[trees[t][0] for t in tree_ids], y=[trees[t][1] for t in tree_ids], mode="markers", name="Initial estimates", marker={"symbol": "circle-open", "size": 14, "color": "#64748b", "line": {"width": 2}}, text=[str(t) for t in tree_ids], hovertemplate="Initial estimate · Tree %{text}<br>X %{x:.0f} mm<br>Y %{y:.0f} mm<extra></extra>"))
     colors = ["#f59e0b" if t in underconstrained else ("#2563eb" if t in (1, 2) else "#15803d") for t in tree_ids]
     fig.add_trace(go.Scatter(x=[coords[t][0] for t in tree_ids], y=[coords[t][1] for t in tree_ids], mode="markers+text", name="Adjusted positions", text=[str(t) for t in tree_ids], textposition="top center", marker={"size": 15, "color": colors, "line": {"color": "white", "width": 1}}, customdata=[[degree[t], t in underconstrained, t] for t in tree_ids], hovertemplate="Tree %{text}<br>X %{x:.0f} mm<br>Y %{y:.0f} mm<br>Links: %{customdata[0]}<extra></extra>"))
-fig.update_layout(height=620, margin={"l": 10, "r": 10, "t": 20, "b": 10}, xaxis={"title": "X (mm)", "range": [0, max_x if coords else 1000], "zeroline": True, "scaleanchor": "y", "scaleratio": 1, "constrain": "domain", "constraintoward": "left"}, yaxis={"title": "Y (mm)", "range": [0, max_y if coords else 1000], "zeroline": True, "constrain": "domain", "constraintoward": "bottom"}, legend={"orientation": "h", "y": 1.02})
+fig.update_layout(height=620, margin={"l": 10, "r": 10, "t": 20, "b": 10}, xaxis={"title": "X (mm)", "range": [-x_padding if coords else -100, max_x if coords else 1000], "zeroline": True, "scaleanchor": "y", "scaleratio": 1, "constrain": "domain", "constraintoward": "left"}, yaxis={"title": "Y (mm)", "range": [-y_padding if coords else -100, max_y if coords else 1000], "zeroline": True, "constrain": "domain", "constraintoward": "bottom"}, legend={"orientation": "h", "y": 1.02})
 map_revision = st.session_state.get("map_revision", 0)
 map_event = st.plotly_chart(fig, use_container_width=True, key=f"survey_map_{map_revision}", on_select="rerun", selection_mode="points")
 try:
@@ -299,22 +328,33 @@ for point in selected_points:
             initial_x = 0
         st.session_state["tree_editor_values"] = {"id": tree, "x": int(round(initial_x)), "y": int(round(initial_y))}
         st.session_state["tree_form_revision"] = st.session_state.get("tree_form_revision", 0) + 1
-        pending = st.session_state.get("pending_measurement_trees", [])
-        if not pending or len(pending) >= 2:
-            st.session_state["pending_measurement_trees"] = [tree]
-            second_tree = next((item for item in tree_ids if item != tree), tree)
-            st.session_state["measurement_editor_values"] = {"from": tree, "to": second_tree, "distance": st.session_state.get("measurement_editor_values", {}).get("distance", 1000)}
-            st.session_state["selected_measurement_index"] = None
-            st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
-        elif len(pending) == 1 and pending[0] != tree:
-            st.session_state["pending_measurement_trees"] = [pending[0], tree]
-            st.session_state["measurement_editor_values"] = {"from": pending[0], "to": tree, "distance": st.session_state.get("measurement_editor_values", {}).get("distance", 1000)}
-            st.session_state["selected_measurement_index"] = None
-            st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
+        measurement_values = st.session_state.get("measurement_editor_values", {"from": tree_ids[0], "to": tree_ids[1], "distance": 1000})
+        from_selected = int(measurement_values.get("from", tree_ids[0]))
+        to_selected = int(measurement_values.get("to", tree_ids[1]))
+        next_field = st.session_state.get("measurement_next_field", "from")
+        if tree == from_selected:
+            next_field = "to"
+        elif tree == to_selected:
+            next_field = "from"
+        elif next_field == "from":
+            from_selected = tree
+            next_field = "to"
+        else:
+            to_selected = tree
+            next_field = "from"
+        st.session_state["measurement_editor_values"] = {
+            "from": from_selected,
+            "to": to_selected,
+            "distance": measurement_values.get("distance", 1000),
+        }
+        st.session_state["measurement_next_field"] = next_field
+        st.session_state["selected_measurement_index"] = None
+        st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
+        st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
         st.session_state["map_revision"] = map_revision + 1
         st.rerun()
 st.caption("Tree 1 is at the lower-left origin, with Tree 2 above it on the Y axis. Gray lines show measurements; amber trees need more links or a connection to the anchored network. Open circles show saved starting estimates.")
-st.caption("Tap a grid point to place the selected initial estimate. Tap two adjusted tree markers to fill From and To in the measurement form. Tap a measurement line to highlight its tree-pair records.")
+st.caption("Tap a grid point to place the selected initial estimate. Tree marker taps alternate between From and To; clicking an existing endpoint keeps it and sends the next new pick to the other field. Tap a measurement line to highlight its tree-pair records.")
 
 if solver_info and solver_info["success"]:
     moved = []
@@ -336,6 +376,8 @@ elif measurements:
     st.warning(solver_info["message"] if solver_info else "The network needs Trees 1 and 2 to calculate positions.")
 
 st.subheader("Measurement records")
+if duplicate_measurements_collapsed:
+    st.warning(f"Found {duplicate_measurements_collapsed} duplicate directed record(s); kept the last saved value for each From → To pair.")
 if measurements:
     table_rows = []
     for record_id, (a, b, d) in enumerate(measurements):
@@ -394,6 +436,7 @@ if measurements:
             st.session_state["measurement_editor_values"] = {
                 "from": selected_record[0], "to": selected_record[1], "distance": int(round(selected_record[2]))
             }
+            st.session_state["measurement_next_field"] = "from"
             st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
         if pair_changed or selection_changed or editor_values_changed:
             st.rerun()
