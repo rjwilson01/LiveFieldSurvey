@@ -9,6 +9,7 @@ with st.expander("Set the map reference", expanded=True):
     - Tree 2 lies on the positive **Y axis**. Its X coordinate is fixed at zero.
     - Record a Tree 1 ↔ Tree 2 baseline distance to establish the map scale. Choose which direction to record based on how the tape or laser was read.
     - The map keeps a small negative margin so the origin markers and axis remain visible.
+    - Gray lines show recorded measurements. Amber trees need more links or a connection to the anchored network.
     """)
 
 with st.expander("Add trees and set starting positions", expanded=True):
@@ -27,9 +28,11 @@ with st.expander("Record and edit measurements", expanded=True):
     st.markdown("""
     - Tap a tree marker to fill the highlighted **From** or **To** field. The next map pick alternates between these fields. Tapping the current endpoint keeps it and moves the next pick to the other field; a tree cannot measure to itself.
     - You may enter the two IDs with the dropdowns and type-to-search instead.
+    - Tree 1 is at the lower-left origin and Tree 2 is above it on the Y axis. Tap a grid point to set the selected tree's starting estimate; then Add or Update in the sidebar.
     - Enter a distance in millimetres and press **Add measurement**. One record is allowed per direction for each pair, so A → B and B → A can both be stored.
-    - Click a measurement row to load it into the sidebar. Press **Update measurement** or **Delete measurement**. A line tap highlights all records for that pair.
-    - Rows are grouped by tree pair. **Δ** is adjusted distance minus measured distance, rounded to whole millimetres. Red rows exceed the editable residual threshold.
+    - Edit **Meas** directly in the table. Use the **Select** checkbox to load a record into the sidebar, where you can press **Update measurement** or **Delete measurement**. A line tap highlights all records for that pair.
+    - Selecting a row shows its From and To trees, their initial coordinates, and their calculated coordinates in the sidebar. Edit the initial coordinates there and press **Update starting estimates** to adjust the solver's starting positions.
+    - Rows are grouped by tree pair. **Δ** is adjusted distance minus measured distance, rounded to whole millimetres. Red rows exceed the editable residual threshold. All table fields except **Meas** and **Select** are read only.
     """)
 
 with st.expander("Understand map colours and calculated locations"):

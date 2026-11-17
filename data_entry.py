@@ -68,9 +68,9 @@ with st.sidebar:
 
     with st.expander("Start a new dataset"):
         st.caption("Creates a fresh survey with anchor Trees 1 and 2. The next tree ID will be 3.")
+        confirm_new_dataset = st.checkbox("I understand this replaces the active survey", key=f"confirm_new_dataset_{dataset_info['serial']}")
         with st.form(f"new_dataset_form_{dataset_info['serial']}"):
             new_dataset_name = st.text_input("New dataset name", value="Field Survey")
-            confirm_new_dataset = st.checkbox("I understand this replaces the active survey")
             start_new_dataset = st.form_submit_button("Start new dataset", type="primary", disabled=not confirm_new_dataset)
         if start_new_dataset:
             storage.replace_dataset(new_dataset_name, {1: (0, 0), 2: (0, 1)}, [], next_tree_id=3)
@@ -274,6 +274,40 @@ with st.sidebar:
             st.session_state["measurement_form_revision"] = measurement_revision + 1
             st.rerun()
 
+    if selected_measurement_index is not None and 0 <= selected_measurement_index < len(measurements):
+        selected_from, selected_to, _ = measurements[selected_measurement_index]
+        position_revision = f"{measurement_revision}_{selected_measurement_index}_{tree_form_revision}"
+        with st.expander("Selected measurement trees", expanded=True):
+            with st.form(f"selected_tree_positions_{position_revision}"):
+                endpoint_columns = st.columns(2)
+                edited_positions = {}
+                for column, endpoint, tree in zip(endpoint_columns, ("From", "To"), (selected_from, selected_to)):
+                    x, y = trees[tree]
+                    calc_x, calc_y = coords.get(tree, (None, None))
+                    with column:
+                        st.markdown(f"**{endpoint} ID {tree}**")
+                        init_x_col, init_y_col = st.columns(2)
+                        with init_x_col:
+                            edited_x = st.number_input(f"Init X · {endpoint}", min_value=0, value=int(x), step=100, disabled=tree in (1, 2), key=f"selected_init_x_{position_revision}_{endpoint}")
+                        with init_y_col:
+                            edited_y = st.number_input(f"Init Y · {endpoint}", min_value=0, value=int(y), step=100, disabled=tree == 1, key=f"selected_init_y_{position_revision}_{endpoint}")
+                        calc_x_text = "—" if calc_x is None else f"{int(round(calc_x))} mm"
+                        calc_y_text = "—" if calc_y is None else f"{int(round(calc_y))} mm"
+                        calc_x_col, calc_y_col = st.columns(2)
+                        with calc_x_col:
+                            st.text_input(f"Calc X · {endpoint}", value=calc_x_text, disabled=True, key=f"selected_calc_x_{position_revision}_{endpoint}")
+                        with calc_y_col:
+                            st.text_input(f"Calc Y · {endpoint}", value=calc_y_text, disabled=True, key=f"selected_calc_y_{position_revision}_{endpoint}")
+                        edited_positions[tree] = (edited_x, edited_y)
+                update_positions = st.form_submit_button("Update starting estimates", width="stretch")
+            if update_positions:
+                for tree, (x, y) in edited_positions.items():
+                    trees[tree] = (0 if tree in (1, 2) else int(x), 0 if tree == 1 else int(y))
+                persist_trees()
+                st.session_state["tree_form_revision"] = tree_form_revision + 1
+                st.session_state["map_revision"] = st.session_state.get("map_revision", 0) + 1
+                st.rerun()
+
     st.divider()
     st.header("Deviation alerts")
     distance_tolerance = st.number_input("Moderate distance residual (mm)", min_value=0.0, value=50.0, step=10.0)
@@ -281,8 +315,6 @@ with st.sidebar:
 
 
 st.subheader("Live map")
-if not solver_info or not solver_info["baseline_measured"]:
-    st.caption("Baseline guidance is on the Help page.")
 show_estimates = st.checkbox("Show initial estimates", value=st.session_state.get("show_initial_estimates", False), key="show_initial_estimates")
 
 degree = {t: 0 for t in tree_ids}
@@ -391,8 +423,6 @@ for point in sorted(selected_points, key=lambda selected: selected.get("curve_nu
         st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
         st.session_state["map_revision"] = map_revision + 1
         st.rerun()
-st.caption("Gray lines show measurements; amber trees need more links or a connection to the anchored network.")
-
 if solver_info and solver_info["success"]:
     moved = []
     residual_rows = []
@@ -444,52 +474,77 @@ if measurements:
             return ["background-color: #fee2e2"] * len(row)
         return [""] * len(row)
 
-    table_event = st.dataframe(
-        visible_df.style.apply(row_style, axis=1),
+    editor_df = visible_df.copy()
+    editor_df.insert(0, "Select", [int(record_id) == selected_measurement for record_id in table_df["_record_id"]])
+    table_revision = st.session_state.get("measurement_table_revision", 0)
+    edited_table = st.data_editor(
+        editor_df.style.apply(row_style, axis=1),
         width="stretch",
         hide_index=True,
-        key=f"measurement_table_{st.session_state.get('measurement_table_revision', 0)}",
-        on_select="rerun",
-        selection_mode="single-row",
+        key=f"measurement_table_{table_revision}",
+        disabled=["#", "Pair", "From", "To", "Adj", "Δ"],
+        column_config={
+            "Select": st.column_config.CheckboxColumn("Select", help="Select a record to edit or inspect its trees."),
+            "Meas": st.column_config.NumberColumn("Meas", min_value=1, step=1, format="%d"),
+        },
+        num_rows="fixed",
     )
-    try:
-        selected_rows = table_event.selection.rows
-    except (AttributeError, TypeError):
-        selected_rows = []
-    if selected_rows:
-        row_num = selected_rows[0]
-        selected_measurement = int(table_df.iloc[row_num]["_record_id"])
-        selected_record = measurements[selected_measurement]
-        selection_changed = selected_measurement != st.session_state.get("selected_measurement_index")
+    selected_rows = [row for row, selected in enumerate(edited_table["Select"]) if bool(selected)]
+    new_selected_measurement = int(table_df.iloc[selected_rows[0]]["_record_id"]) if selected_rows else None
+    old_selected_measurement = st.session_state.get("selected_measurement_index")
+    selection_changed = new_selected_measurement != old_selected_measurement
+    st.session_state["selected_measurement_index"] = new_selected_measurement
+    if new_selected_measurement is not None:
+        selected_record = measurements[new_selected_measurement]
+        selected_pair = tuple(sorted(selected_record[:2]))
         editor_values_changed = st.session_state.get("measurement_editor_values") != {
             "from": selected_record[0], "to": selected_record[1], "distance": int(round(selected_record[2]))
         }
-        st.session_state["selected_measurement_index"] = selected_measurement
-        selected_pair = table_df.iloc[row_num]["_pair"]
         pair_changed = st.session_state.get("highlight_pair") != selected_pair
-        if pair_changed:
-            st.session_state["highlight_pair"] = selected_pair
+        st.session_state["highlight_pair"] = selected_pair
         if selection_changed or editor_values_changed:
             st.session_state["measurement_editor_values"] = {
                 "from": selected_record[0], "to": selected_record[1], "distance": int(round(selected_record[2]))
             }
             st.session_state["measurement_next_field"] = "from"
             st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
-        if pair_changed or selection_changed or editor_values_changed:
-            st.rerun()
+    else:
+        pair_changed = False
+
+    measurements_changed = False
+    for row_num, edited_row in edited_table.iterrows():
+        record_id = int(table_df.iloc[row_num]["_record_id"])
+        if pd.isna(edited_row["Meas"]):
+            continue
+        edited_distance = int(round(float(edited_row["Meas"])))
+        a, b, old_distance = measurements[record_id]
+        if edited_distance > 0 and edited_distance != int(round(old_distance)):
+            measurements[record_id] = (a, b, float(edited_distance))
+            measurements_changed = True
+    if measurements_changed:
+        persist_measurements()
+        st.session_state["measurement_table_revision"] = table_revision + 1
+        st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
+        st.session_state["map_revision"] = st.session_state.get("map_revision", 0) + 1
+        if new_selected_measurement is not None:
+            a, b, distance = measurements[new_selected_measurement]
+            st.session_state["measurement_editor_values"] = {"from": a, "to": b, "distance": int(round(distance))}
+        st.rerun()
+    if selection_changed or pair_changed:
+        st.session_state["measurement_table_revision"] = table_revision + 1
+        st.rerun()
 
 else:
     st.caption("No tape measurements recorded yet.")
 
-st.caption("Notes: Tree 1 is at the lower-left origin and Tree 2 is above it on the Y axis. Tap a grid point to set the selected tree's starting estimate; then Add or Update in the sidebar. Tree marker taps fill From and To. Tap a measurement line to highlight records for that tree pair.")
-st.caption("Measurements are grouped by tree pair; each From → To reading remains a separate record. Δ = adjusted minus measured, rounded to whole millimetres. Click a row to load it into the Measurement editor in the sidebar.")
-
-st.subheader("Export survey")
-exporter.export_survey(
-    pd.DataFrame([{"Tree": t, "Initial_X_mm": trees[t][0], "Initial_Y_mm": trees[t][1], "Adjusted_X_mm": coords.get(t, (float("nan"), float("nan")))[0], "Adjusted_Y_mm": coords.get(t, (float("nan"), float("nan")))[1], "Links": degree[t], "Needs_more_measurements": t in underconstrained} for t in tree_ids]),
-    pd.DataFrame(residual_rows if solver_info and solver_info["success"] else [{"From": a, "To": b, "Measured_mm": d} for a, b, d in measurements]),
-    dataset_info,
-    trees,
-    measurements,
-    on_download=mark_dataset_downloaded,
-)
+with st.sidebar:
+    st.divider()
+    st.header("Export survey")
+    exporter.export_survey(
+        pd.DataFrame([{"Tree": t, "Initial_X_mm": trees[t][0], "Initial_Y_mm": trees[t][1], "Adjusted_X_mm": coords.get(t, (float("nan"), float("nan")))[0], "Adjusted_Y_mm": coords.get(t, (float("nan"), float("nan")))[1], "Links": degree[t], "Needs_more_measurements": t in underconstrained} for t in tree_ids]),
+        pd.DataFrame(residual_rows if solver_info and solver_info["success"] else [{"From": a, "To": b, "Measured_mm": d} for a, b, d in measurements]),
+        dataset_info,
+        trees,
+        measurements,
+        on_download=mark_dataset_downloaded,
+    )
