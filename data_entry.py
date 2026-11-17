@@ -165,8 +165,14 @@ with st.sidebar:
     editor_values = st.session_state.get("tree_editor_values", {})
     if int(editor_values.get("id", -1)) == tree_id and editor_values.get("pending_map_pick"):
         current_x, current_y = int(editor_values["x"]), int(editor_values["y"])
+    elif tree_id in trees:
+        current_x, current_y = trees[tree_id]
+    elif int(editor_values.get("id", -1)) != tree_id:
+        # Moving the editor to the next unused ID should carry the current
+        # rough estimate forward instead of resetting it to the origin.
+        current_x, current_y = int(editor_values.get("x", 0)), int(editor_values.get("y", 0))
     else:
-        current_x, current_y = trees.get(tree_id, (0, 0))
+        current_x, current_y = 0, 0
     st.session_state["tree_editor_values"] = {"id": tree_id, "x": int(current_x), "y": int(current_y)}
     tree_form_key = f"tree_management_{tree_form_revision}_{tree_id}"
     with st.form(tree_form_key):
