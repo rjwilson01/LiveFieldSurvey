@@ -42,6 +42,7 @@ with st.expander("Understand map colours and calculated locations"):
 
 with st.expander("Back up and transfer a dataset"):
     st.markdown("""
+    - Choose **Start a new dataset** in the sidebar to finish the current survey and start fresh with Trees 1 and 2 as anchors. Its first available tree ID is 3, and the dataset receives a new serial number.
     - The sidebar shows whether changes have been included in a requested backup. Download the complete dataset ZIP regularly; it preserves the dataset identity, tree estimates, measurements, and retired Tree ID sequence.
     - Upload a saved ZIP in the sidebar to replace the active dataset. The app shows a replacement warning and requires confirmation before loading it.
     - The CSV exports are convenient for spreadsheet review. Use the ZIP to restore a survey in this app.

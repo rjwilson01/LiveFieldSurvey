@@ -66,6 +66,25 @@ with st.sidebar:
         storage.rename_dataset(dataset_name)
         st.rerun()
 
+    with st.expander("Start a new dataset"):
+        st.caption("Creates a fresh survey with anchor Trees 1 and 2. The next tree ID will be 3.")
+        with st.form(f"new_dataset_form_{dataset_info['serial']}"):
+            new_dataset_name = st.text_input("New dataset name", value="Field Survey")
+            confirm_new_dataset = st.checkbox("I understand this replaces the active survey")
+            start_new_dataset = st.form_submit_button("Start new dataset", type="primary", disabled=not confirm_new_dataset)
+        if start_new_dataset:
+            storage.replace_dataset(new_dataset_name, {1: (0, 0), 2: (0, 1)}, [], next_tree_id=3)
+            st.session_state["tree_editor_values"] = {"id": 3, "x": 0, "y": 0}
+            st.session_state["tree_form_revision"] = st.session_state.get("tree_form_revision", 0) + 1
+            st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
+            st.session_state["selected_measurement_index"] = None
+            st.session_state["measurement_editor_values"] = {"from": 1, "to": 2, "distance": 1000}
+            st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
+            st.session_state["measurement_next_field"] = "from"
+            st.session_state["highlight_pair"] = None
+            st.session_state["map_revision"] = st.session_state.get("map_revision", 0) + 1
+            st.rerun()
+
     upload_revision = st.session_state.get("dataset_upload_revision", 0)
     with st.expander("Upload a saved dataset"):
         uploaded_file = st.file_uploader("Dataset ZIP", type=["zip"], key=f"dataset_upload_{upload_revision}")
