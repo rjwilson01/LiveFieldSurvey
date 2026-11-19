@@ -438,8 +438,18 @@ for point in sorted(selected_points, key=lambda selected: selected.get("curve_nu
             st.rerun()
     line_start, line_end = 1, 1 + len(measurements)
     if curve_number is not None and line_start <= curve_number < line_end:
-        _, a, b = point.get("customdata", (None, None, None))
+        record_id, a, b = point.get("customdata", (None, None, None))
+        record_id, a, b = int(record_id), int(a), int(b)
         st.session_state["highlight_pair"] = tuple(sorted((int(a), int(b))))
+        st.session_state["selected_measurement_index"] = record_id
+        st.session_state["measurement_editor_values"] = {
+            "from": a,
+            "to": b,
+            "distance": int(round(measurements[record_id][2])),
+        }
+        st.session_state["measurement_next_field"] = "from"
+        st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
+        st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
         st.session_state["map_revision"] = map_revision + 1
         st.rerun()
     tree_curve = line_end + 1
