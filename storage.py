@@ -161,8 +161,6 @@ def load_trees():
         x, y = max(0, int(round(float(row.x)))), max(0, int(round(float(row.y))))
         if tree_id == 1:
             x, y = 0, 0
-        elif tree_id == 2:
-            x = 0
         trees[tree_id] = (x, y)
     return trees
 

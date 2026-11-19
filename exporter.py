@@ -86,7 +86,12 @@ def parse_dataset_bundle(upload_bytes):
     if 1 not in trees or 2 not in trees:
         raise ValueError("The uploaded dataset must include anchor trees 1 and 2.")
     trees[1] = (0, 0)
-    trees[2] = (0, trees[2][1])
+    # Tree 2 may use either positive survey axis as its reference direction.
+    if trees[2][0] and trees[2][1]:
+        if trees[2][0] > trees[2][1]:
+            trees[2] = (trees[2][0], 0)
+        else:
+            trees[2] = (0, trees[2][1])
 
     measurements = []
     for row in measurement_frame.itertuples(index=False):

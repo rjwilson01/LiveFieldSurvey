@@ -72,8 +72,8 @@ with st.expander("Map orientation and deviation alerts", expanded=True):
 with st.expander("Set the map reference", expanded=True):
     st.markdown("""
     - Tree 1 is fixed at **(0, 0)**.
-    - Tree 2 lies on the positive **Y axis**. Its X coordinate is fixed at zero.
-    - Record a Tree 1 ↔ Tree 2 baseline distance to establish the map scale. Choose which direction to record based on how the tape or laser was read.
+    - Tree 2 lies on either the positive **X axis** or positive **Y axis**, selected in Tree management. The other coordinate stays at zero.
+    - The Tree 1 ↔ Tree 2 baseline is a regular measurement. If you save Tree 2 with a nonzero starting coordinate before adding a baseline reading, the app creates a 1 → 2 measurement from that distance. Later baseline edits set Tree 2's coordinate to the measured distance on its selected axis.
     - The map keeps a small negative margin so the origin markers and axis remain visible.
     - Gray lines show recorded measurements. Amber trees need more links or a connection to the anchored network.
     """)
@@ -87,14 +87,14 @@ with st.expander("Add trees and set starting positions", expanded=True):
 
     Tree 1 and Tree 2 are protected anchors. Deleted IDs are retired and are not offered again. The starting estimates guide the solver; they are approximate positions and may shift substantially after measurements are added.
 
-    **Tree ID cases:** Tree 1 is fixed at the origin and both coordinates are disabled. Tree 2 stays on the Y axis, so X is disabled and Y can be set. Other existing trees can have both starting estimates edited or be deleted. The final option in the ID list is the next unused ID, ready to add.
+    **Tree ID cases:** Tree 1 is fixed at the origin and both coordinates are disabled. Tree 2 can use either positive axis; select its reference axis and set its starting distance when there is no baseline measurement. Other existing trees can have both starting estimates edited or be deleted. The final option in the ID list is the next unused ID, ready to add.
     """)
 
 with st.expander("Record and edit measurements", expanded=True):
     st.markdown("""
     - Tap a tree marker to fill the highlighted **From** or **To** field. The next map pick alternates between these fields. Tapping the current endpoint keeps it and moves the next pick to the other field; a tree cannot measure to itself.
     - You may enter the two IDs with the dropdowns and type-to-search instead.
-    - Tree 1 is at the lower-left origin and Tree 2 is above it on the Y axis. Tap a grid point to set the selected tree's starting estimate; then Add or Update in the sidebar.
+    - Tree 1 is at the origin. Tree 2 lies along the selected X or Y reference axis. Tap a grid point to set a starting estimate; then Add or Update in the sidebar.
     - Choosing From and To fills the distance from an existing directed record when present. Otherwise, it estimates the distance from calculated positions where available, falling back to starting estimates. The distance remains editable.
     - If the chosen From → To record already exists, the app loads it and changes the action to **Update measurement**. The table's **Select** checkboxes allow only one active record; choosing another clears the previous selection.
     - Enter a distance in millimetres and press **Add measurement**. One record is allowed per direction for each pair, so A → B and B → A can both be stored.

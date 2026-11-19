@@ -27,10 +27,13 @@ def sync_tree2_to_baseline():
     baseline_readings = [distance for a, b, distance in measurements if {a, b} == {1, 2}]
     if not baseline_readings or 2 not in trees:
         return False
-    baseline_y = max(0, int(round(sum(baseline_readings) / len(baseline_readings))))
-    if trees[2] == (0, baseline_y):
+    old_x, old_y = trees[2]
+    anchor_axis = 0 if old_x > old_y else 1
+    baseline_distance = max(0, int(round(sum(baseline_readings) / len(baseline_readings))))
+    baseline_position = (baseline_distance, 0) if anchor_axis == 0 else (0, baseline_distance)
+    if trees[2] == baseline_position:
         return False
-    trees[2] = (0, baseline_y)
+    trees[2] = baseline_position
     storage.save_trees(trees)
     storage.mark_dataset_dirty()
     return True
@@ -45,7 +48,7 @@ def persist_trees():
 
 def persist_measurements():
     storage.save_measurements(measurements)
-    # The solver constrains Tree 2 to the mean measured baseline on +Y.
+    # The solver constrains Tree 2 to the mean baseline on its selected axis.
     sync_tree2_to_baseline()
     storage.mark_dataset_dirty()
 
@@ -128,9 +131,18 @@ with st.sidebar:
         tree_form_key = f"tree_management_{tree_form_revision}_{tree_id}"
         tree2_has_baseline = any({a, b} == {1, 2} for a, b, _ in measurements)
         with st.form(tree_form_key):
+            tree2_axis = "X" if tree_id == 2 and current_x > current_y else "Y"
+            if tree_id == 2:
+                tree2_axis = st.selectbox(
+                    "Tree 2 reference axis",
+                    ("Y", "X"),
+                    index=0 if tree2_axis == "Y" else 1,
+                    help="Tree 2 stays on one positive axis. A 1 ↔ 2 measurement sets its distance along this axis.",
+                    key=f"tree2_axis_{tree_form_revision}",
+                )
             left, right = st.columns(2)
             with left:
-                estimate_x = st.number_input("Initial X", min_value=0, value=int(current_x), step=100, disabled=tree_id in (1, 2), key=f"tree_x_{tree_form_revision}_{tree_id}")
+                estimate_x = st.number_input("Initial X", min_value=0, value=int(current_x), step=100, disabled=tree_id == 1 or (tree_id == 2 and tree2_has_baseline), key=f"tree_x_{tree_form_revision}_{tree_id}")
             with right:
                 estimate_y = st.number_input("Initial Y", min_value=0, value=int(current_y), step=100, disabled=tree_id == 1 or (tree_id == 2 and tree2_has_baseline), key=f"tree_y_{tree_form_revision}_{tree_id}")
             add_col, delete_col = st.columns(2)
@@ -144,8 +156,20 @@ with st.sidebar:
                 if tree_id == 1:
                     st.error("Tree 1 is fixed at the origin.")
                 else:
-                    trees[tree_id] = (0 if tree_id == 2 else int(estimate_x), int(estimate_y))
-                    persist_trees()
+                    if tree_id == 2:
+                        baseline_readings = [d for a, b, d in measurements if {a, b} == {1, 2}]
+                        estimated_distance = int(estimate_x) if tree2_axis == "X" else int(estimate_y)
+                        anchor_distance = int(round(sum(baseline_readings) / len(baseline_readings))) if baseline_readings else estimated_distance
+                        anchor_distance = max(0, anchor_distance)
+                        trees[tree_id] = (anchor_distance, 0) if tree2_axis == "X" else (0, anchor_distance)
+                        if not baseline_readings and anchor_distance > 0:
+                            measurements.append((1, 2, float(anchor_distance)))
+                            persist_measurements()
+                        else:
+                            persist_trees()
+                    else:
+                        trees[tree_id] = (int(estimate_x), int(estimate_y))
+                        persist_trees()
                     st.session_state["tree_editor_values"] = {"id": tree_id, "x": int(trees[tree_id][0]), "y": int(trees[tree_id][1])}
                     st.session_state["tree_form_revision"] = tree_form_revision + 1
                     st.rerun()
@@ -407,7 +431,7 @@ for point in sorted(selected_points, key=lambda selected: selected.get("curve_nu
         if selected_estimate_tree != 1:
             tap_x, tap_y = int(round(tap_x)), int(round(tap_y))
             if selected_estimate_tree == 2:
-                tap_x = 0
+                tap_x, tap_y = (tap_x, 0) if abs(tap_x) > abs(tap_y) else (0, tap_y)
             st.session_state["tree_editor_values"] = {"id": selected_estimate_tree, "x": tap_x, "y": tap_y, "pending_map_pick": True}
             st.session_state["tree_form_revision"] = st.session_state.get("tree_form_revision", 0) + 1
             st.session_state["map_revision"] = map_revision + 1
@@ -424,8 +448,6 @@ for point in sorted(selected_points, key=lambda selected: selected.get("curve_nu
         initial_x, initial_y = trees[tree]
         if tree == 1:
             initial_x, initial_y = 0, 0
-        elif tree == 2:
-            initial_x = 0
         st.session_state["tree_editor_values"] = {"id": tree, "x": int(round(initial_x)), "y": int(round(initial_y))}
         st.session_state["tree_form_revision"] = st.session_state.get("tree_form_revision", 0) + 1
         measurement_values = st.session_state.get("measurement_editor_values", {"from": tree_ids[0], "to": tree_ids[1], "distance": 1000})
