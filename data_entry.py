@@ -290,8 +290,7 @@ with st.sidebar:
         if selected_measurement_index is not None and 0 <= selected_measurement_index < len(measurements):
             selected_from, selected_to, _ = measurements[selected_measurement_index]
             position_revision = f"{measurement_revision}_{selected_measurement_index}_{tree_form_revision}"
-            with st.container(border=True):
-                st.markdown("**Selected measurement trees**")
+            with st.expander("Selected measurement trees", expanded=False):
                 with st.form(f"selected_tree_positions_{position_revision}"):
                     endpoint_columns = st.columns(2)
                     edited_positions = {}
@@ -393,7 +392,7 @@ x_range = [-x_padding, max_x] if horizontal_sign > 0 else [-max_x, x_padding]
 y_range = [-y_padding, max_y] if vertical_sign > 0 else [-max_y, y_padding]
 fig.update_layout(height=620, margin={"l": 10, "r": 10, "t": 20, "b": 10}, xaxis={"title": f"{horizontal_axis_name} (mm)", "range": x_range, "zeroline": True, "scaleanchor": "y", "scaleratio": 1, "constrain": "domain", "constraintoward": "left"}, yaxis={"title": f"{vertical_axis_name} (mm)", "range": y_range, "zeroline": True, "constrain": "domain", "constraintoward": "bottom"}, legend={"orientation": "h", "y": 1.02})
 map_revision = st.session_state.get("map_revision", 0)
-fig.update_layout(autosize=True, uirevision="survey-map-view")
+fig.update_layout(autosize=True, uirevision=f"survey-map-{swap_map_axes}-{mirror_map_x}-{mirror_map_y}")
 active_picker = "from-picker" if st.session_state["measurement_next_field"] == "from" else "to-picker"
 st.markdown(f"<style>.st-key-{active_picker} [data-testid='stVerticalBlockBorderWrapper'] {{ border: 3px solid #16a34a !important; border-radius: 0.75rem; }}</style>", unsafe_allow_html=True)
 map_event = st.plotly_chart(fig, key=f"survey_map_{map_revision}", on_select="rerun", selection_mode="points", config={"responsive": True, "scrollZoom": False})

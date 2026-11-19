@@ -43,5 +43,21 @@ data_entry_page = st.Page(
 help_page = st.Page(page="help_page.py", title="Help", icon="❔")
 data_management_page = st.Page(page="data_management.py", title="Data management", icon="🗂️")
 
-pg = st.navigation([data_entry_page, help_page, data_management_page])
+pages = [data_entry_page, help_page, data_management_page]
+pages_by_title = {page.title: page for page in pages}
+pg = st.navigation(pages, position="hidden")
+
+
+def navigate_to_selected_page():
+    target_page = pages_by_title[st.session_state["app_page_selector"]]
+    st.switch_page(target_page)
+
+
+st.sidebar.selectbox(
+    "Page",
+    options=list(pages_by_title),
+    index=list(pages_by_title).index(pg.title),
+    key="app_page_selector",
+    on_change=navigate_to_selected_page,
+)
 pg.run()
