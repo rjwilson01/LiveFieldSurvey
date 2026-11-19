@@ -21,11 +21,12 @@ section.main [data-testid="stVerticalBlock"] { gap: 0.7rem; }
 
 storage.init_files()
 active_dataset = storage.load_dataset_info()
-if st.session_state.get("map_orientation_dataset_id") != active_dataset["dataset_id"]:
-    st.session_state["map_orientation_dataset_id"] = active_dataset["dataset_id"]
-    st.session_state["map_axis_layout"] = active_dataset.get("map_axis_layout", storage.DEFAULT_MAP_ORIENTATION["map_axis_layout"])
-    st.session_state["mirror_map_x"] = bool(active_dataset.get("mirror_map_x", False))
-    st.session_state["mirror_map_y"] = bool(active_dataset.get("mirror_map_y", False))
+# These values are also used by widgets on the Help page. Reload them on each
+# app run because Streamlit may discard widget state when navigating away from
+# the page containing those widgets.
+st.session_state["map_axis_layout"] = active_dataset.get("map_axis_layout", storage.DEFAULT_MAP_ORIENTATION["map_axis_layout"])
+st.session_state["mirror_map_x"] = bool(active_dataset.get("mirror_map_x", False))
+st.session_state["mirror_map_y"] = bool(active_dataset.get("mirror_map_y", False))
 with st.sidebar:
     st.title("🌳 Live Field Survey")
     if active_dataset.get("not_downloaded", True):
