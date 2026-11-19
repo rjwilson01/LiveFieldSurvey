@@ -6,6 +6,7 @@ import streamlit as st
 import exporter
 import solver
 import storage
+from page_navigation import render_page_title_selector
 
 
 storage.init_files()
@@ -14,7 +15,7 @@ measurements = storage.load_measurements(trees)
 dataset_info = storage.load_dataset_info()
 coords, solver_info = solver.run_network_adjustment(trees, measurements)
 
-st.title("Data management")
+render_page_title_selector("Data management")
 st.caption("Name, back up, transfer, or export a survey dataset.")
 
 with st.expander("Dataset", expanded=True):

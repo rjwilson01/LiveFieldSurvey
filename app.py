@@ -1,5 +1,6 @@
 import streamlit as st
 import storage
+from page_navigation import PAGE_TITLES
 
 st.set_page_config(
     page_title="Live Field Survey Network",
@@ -52,14 +53,16 @@ pg = st.navigation(pages, position="hidden")
 
 
 def navigate_to_selected_page():
-    target_page = pages_by_title[st.session_state["app_page_selector"]]
+    selected_title = st.session_state["app_page_selector"]
+    st.session_state["page_title_selector"] = selected_title
+    target_page = pages_by_title[selected_title]
     st.switch_page(target_page)
 
 
 st.sidebar.selectbox(
     "Page",
-    options=list(pages_by_title),
-    index=list(pages_by_title).index(pg.title),
+    options=PAGE_TITLES,
+    index=PAGE_TITLES.index(pg.title),
     key="app_page_selector",
     on_change=navigate_to_selected_page,
 )

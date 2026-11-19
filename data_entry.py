@@ -7,6 +7,7 @@ import streamlit as st
 
 import solver
 import storage
+from page_navigation import render_page_title_selector
 
 
 storage.init_files()
@@ -321,7 +322,7 @@ with st.sidebar:
 
     distance_tolerance = float(st.session_state.get("distance_tolerance", 50.0))
     estimate_tolerance = float(st.session_state.get("estimate_tolerance", 1000.0))
-st.subheader("Live map")
+render_page_title_selector("Data Entry & Mapping")
 show_estimates = st.checkbox("Show initial estimates", value=st.session_state.get("show_initial_estimates", False), key="show_initial_estimates")
 
 degree = {t: 0 for t in tree_ids}

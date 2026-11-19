@@ -1,7 +1,8 @@
 import streamlit as st
 import plotly.graph_objects as go
+from page_navigation import render_page_title_selector
 
-st.title("Field survey help")
+render_page_title_selector("Help")
 st.caption("Record tree-to-tree tape distances and adjust the map with least squares. Enter coordinates and distances in millimetres.")
 
 with st.expander("Map orientation and deviation alerts", expanded=True):
