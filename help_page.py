@@ -103,12 +103,22 @@ with st.expander("Record and edit measurements", expanded=True):
     - Rows are grouped by tree pair. **Δ** is adjusted distance minus measured distance, rounded to whole millimetres. Red rows exceed the editable residual threshold. All table fields except **Meas** and **Select** are read only.
     """)
 
-with st.expander("Understand map colours and calculated locations"):
+with st.expander("Map legend and calculated locations"):
     st.markdown("""
-    - Blue marks Trees 1 and 2; green marks other trees; amber marks trees that need more links or a connection to the anchored network.
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:0.55rem 1rem;padding:0.4rem 0;">
+      <div><span style="color:#2563eb;font-size:1.2rem;">●</span> <b>Blue trees</b> — Trees 1 and 2, the anchors</div>
+      <div><span style="color:#15803d;font-size:1.2rem;">●</span> <b>Green trees</b> — enough links to adjust</div>
+      <div><span style="color:#f59e0b;font-size:1.2rem;">●</span> <b>Amber trees</b> — need more links or an anchor connection</div>
+      <div><span style="color:#9aa4b2;font-size:1.2rem;">━</span> <b>Gray lines</b> — recorded measurements</div>
+      <div><span style="color:#f97316;font-size:1.2rem;">━</span> <b>Orange line</b> — selected tree pair</div>
+      <div><span style="color:#94a3b8;font-size:1.2rem;">●</span> <b>Faint dots</b> — starting-estimate placement targets</div>
+      <div><span style="color:#64748b;font-size:1.2rem;">◯</span> <b>Open circles</b> — saved initial estimates, when shown</div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("""
     - The least-squares adjustment uses the recorded distances and starting estimates. A calculated location appears in Tree management once available. “Adjusted location so far” means the network is still incomplete, so treat that position as provisional.
     - A large shift warning means a tree moved farther than the editable estimate threshold. This can be expected when a rough map tap is replaced by stronger measurement evidence.
-    - Use **Show initial estimates** above the map to compare the saved starting positions with adjusted positions. It stays in the selected state across map clicks.
+    - Use **Show initial estimates** to compare the saved starting positions with adjusted positions. Use **Show placement targets** to make the faint tap grid visible or hide it for easier line selection. Both choices stay selected as you work on the map.
     """)
 
 with st.expander("Back up and transfer a dataset"):

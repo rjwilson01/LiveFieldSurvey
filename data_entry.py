@@ -347,7 +347,28 @@ with st.sidebar:
     distance_tolerance = float(st.session_state.get("distance_tolerance", 50.0))
     estimate_tolerance = float(st.session_state.get("estimate_tolerance", 1000.0))
 render_page_title_selector("Data Entry & Mapping")
-show_estimates = st.checkbox("Show initial estimates", value=st.session_state.get("show_initial_estimates", False), key="show_initial_estimates")
+
+
+def remember_map_display_preference(session_key, setting_key):
+    st.session_state[setting_key] = bool(st.session_state[session_key])
+
+
+estimate_toggle, target_toggle = st.columns(2)
+with estimate_toggle:
+    show_estimates = st.checkbox(
+        "Show initial estimates",
+        key="show_initial_estimates",
+        on_change=remember_map_display_preference,
+        args=("show_initial_estimates", "show_initial_estimates_setting"),
+    )
+with target_toggle:
+    show_starting_targets = st.checkbox(
+        "Show placement targets",
+        key="show_starting_targets",
+        on_change=remember_map_display_preference,
+        args=("show_starting_targets", "show_starting_targets_setting"),
+        help="Hide the faint grid dots when they make it hard to tap measurement lines.",
+    )
 
 degree = {t: 0 for t in tree_ids}
 adjacency = {t: set() for t in tree_ids}
@@ -391,7 +412,7 @@ if coords:
     grid_y = np.linspace(0, max_y, 25) * vertical_sign
     grid_display_points = [(float(x), float(y)) for x in grid_x for y in grid_y]
     tap_points = [map_to_survey(x, y) for x, y in grid_display_points]
-    fig.add_trace(go.Scatter(x=[p[0] for p in grid_display_points], y=[p[1] for p in grid_display_points], customdata=tap_points, mode="markers", marker={"size": 18, "color": "rgba(100,116,139,0.20)"}, hovertemplate="Tap to set starting estimate<br>Survey X %{customdata[0]:.0f} mm<br>Survey Y %{customdata[1]:.0f} mm<extra></extra>", showlegend=False, name="Tap to place estimate"))
+    fig.add_trace(go.Scatter(x=[p[0] for p in grid_display_points], y=[p[1] for p in grid_display_points], customdata=tap_points, mode="markers", marker={"size": 18, "color": "rgba(100,116,139,0.20)"}, hovertemplate="Tap to set starting estimate<br>Survey X %{customdata[0]:.0f} mm<br>Survey Y %{customdata[1]:.0f} mm<extra></extra>", showlegend=False, visible=show_starting_targets, name="Starting estimate targets"))
     for measurement_index, (a, b, d) in enumerate(measurements):
         if a in coords and b in coords:
             xa, ya = survey_to_map(*coords[a])
@@ -405,7 +426,7 @@ if coords:
     fig.add_trace(go.Scatter(x=[point[0] for point in estimate_points], y=[point[1] for point in estimate_points], customdata=[[trees[t][0], trees[t][1]] for t in tree_ids], mode="markers", name="Initial estimates", visible=show_estimates, showlegend=False, marker={"symbol": "circle-open", "size": 12, "color": "#64748b", "line": {"width": 2}}, text=[str(t) for t in tree_ids], hovertemplate="Initial estimate · Tree %{text}<br>Survey X %{customdata[0]:.0f} mm<br>Survey Y %{customdata[1]:.0f} mm<extra></extra>"))
     colors = ["#f59e0b" if t in underconstrained else ("#2563eb" if t in (1, 2) else "#15803d") for t in tree_ids]
     adjusted_points = [survey_to_map(*coords[t]) for t in tree_ids]
-    fig.add_trace(go.Scatter(x=[point[0] for point in adjusted_points], y=[point[1] for point in adjusted_points], mode="markers+text", name="Adjusted positions", text=[str(t) for t in tree_ids], textposition="top center", marker={"size": 15, "color": colors, "line": {"color": "white", "width": 1}}, customdata=[[degree[t], t in underconstrained, t, coords[t][0], coords[t][1]] for t in tree_ids], hovertemplate="Tree %{text}<br>Survey X %{customdata[3]:.0f} mm<br>Survey Y %{customdata[4]:.0f} mm<br>Links: %{customdata[0]}<extra></extra>"))
+    fig.add_trace(go.Scatter(x=[point[0] for point in adjusted_points], y=[point[1] for point in adjusted_points], mode="markers+text", name="Adjusted positions", showlegend=False, text=[str(t) for t in tree_ids], textposition="top center", marker={"size": 15, "color": colors, "line": {"color": "white", "width": 1}}, customdata=[[degree[t], t in underconstrained, t, coords[t][0], coords[t][1]] for t in tree_ids], hovertemplate="Tree %{text}<br>Survey X %{customdata[3]:.0f} mm<br>Survey Y %{customdata[4]:.0f} mm<br>Links: %{customdata[0]}<extra></extra>"))
 else:
     max_x = max_y = 1000
     x_padding = y_padding = 100
@@ -413,7 +434,7 @@ horizontal_axis_name = "Y" if swap_map_axes else "X"
 vertical_axis_name = "X" if swap_map_axes else "Y"
 x_range = [-x_padding, max_x] if horizontal_sign > 0 else [-max_x, x_padding]
 y_range = [-y_padding, max_y] if vertical_sign > 0 else [-max_y, y_padding]
-fig.update_layout(height=620, margin={"l": 10, "r": 10, "t": 20, "b": 10}, xaxis={"title": f"{horizontal_axis_name} (mm)", "range": x_range, "zeroline": True, "scaleanchor": "y", "scaleratio": 1, "constrain": "domain", "constraintoward": "left"}, yaxis={"title": f"{vertical_axis_name} (mm)", "range": y_range, "zeroline": True, "constrain": "domain", "constraintoward": "bottom"}, legend={"orientation": "h", "y": 1.02})
+fig.update_layout(height=620, margin={"l": 10, "r": 10, "t": 20, "b": 10}, xaxis={"title": f"{horizontal_axis_name} (mm)", "range": x_range, "zeroline": True, "scaleanchor": "y", "scaleratio": 1, "constrain": "domain", "constraintoward": "left"}, yaxis={"title": f"{vertical_axis_name} (mm)", "range": y_range, "zeroline": True, "constrain": "domain", "constraintoward": "bottom"}, showlegend=False)
 map_revision = st.session_state.get("map_revision", 0)
 fig.update_layout(autosize=True, uirevision=f"survey-map-{swap_map_axes}-{mirror_map_x}-{mirror_map_y}")
 active_picker = "from-picker" if st.session_state["measurement_next_field"] == "from" else "to-picker"
@@ -425,7 +446,7 @@ except (AttributeError, TypeError):
     selected_points = []
 for point in sorted(selected_points, key=lambda selected: selected.get("curve_number") == 0):
     curve_number = point.get("curve_number")
-    if curve_number == 0:
+    if curve_number == 0 and show_starting_targets:
         tap_x, tap_y = point.get("customdata", (point.get("x"), point.get("y")))
         selected_estimate_tree = int(st.session_state["tree_editor_values"]["id"])
         if selected_estimate_tree != 1:

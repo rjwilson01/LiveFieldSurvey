@@ -27,6 +27,10 @@ active_dataset = storage.load_dataset_info()
 st.session_state["map_axis_layout"] = active_dataset.get("map_axis_layout", storage.DEFAULT_MAP_ORIENTATION["map_axis_layout"])
 st.session_state["mirror_map_x"] = bool(active_dataset.get("mirror_map_x", False))
 st.session_state["mirror_map_y"] = bool(active_dataset.get("mirror_map_y", False))
+st.session_state.setdefault("show_initial_estimates_setting", False)
+st.session_state.setdefault("show_starting_targets_setting", True)
+st.session_state["show_initial_estimates"] = st.session_state["show_initial_estimates_setting"]
+st.session_state["show_starting_targets"] = st.session_state["show_starting_targets_setting"]
 with st.sidebar:
     st.title("🌳 Live Field Survey")
     if active_dataset.get("not_downloaded", True):
