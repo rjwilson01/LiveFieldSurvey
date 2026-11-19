@@ -22,7 +22,10 @@ storage.init_files()
 active_dataset = storage.load_dataset_info()
 with st.sidebar:
     st.title("🌳 Live Field Survey")
-    st.caption(active_dataset["dataset_id"])
+    if active_dataset.get("not_downloaded", True):
+        st.warning(f"Dataset: {active_dataset['dataset_id']} · backup needed")
+    else:
+        st.caption(active_dataset["dataset_id"])
     st.divider()
 
 # Ensure data arrays survive page-swaps in global context memory

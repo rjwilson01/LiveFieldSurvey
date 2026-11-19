@@ -101,7 +101,6 @@ def suggested_measurement_distance(from_tree, to_tree):
 
 with st.sidebar:
     with st.expander("Tree management", expanded=False):
-        st.header("Tree management")
         if "tree_editor_values" not in st.session_state:
             st.session_state["tree_editor_values"] = {"id": int(dataset_info.get("next_tree_id", max(tree_ids, default=0) + 1)), "x": 0, "y": 0}
         tree_form_revision = st.session_state.get("tree_form_revision", 0)
@@ -186,7 +185,6 @@ with st.sidebar:
 
 
     with st.expander("Measurement", expanded=True):
-        st.subheader("Measurement")
         if "measurement_editor_values" not in st.session_state:
             first, second = (tree_ids[0], tree_ids[1]) if len(tree_ids) > 1 else (1, 2)
             st.session_state["measurement_editor_values"] = {"from": first, "to": second, "distance": 1000}
