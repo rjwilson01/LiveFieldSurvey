@@ -132,14 +132,6 @@ with st.sidebar:
         tree2_has_baseline = any({a, b} == {1, 2} for a, b, _ in measurements)
         with st.form(tree_form_key):
             tree2_axis = "X" if tree_id == 2 and current_x > current_y else "Y"
-            if tree_id == 2:
-                tree2_axis = st.selectbox(
-                    "Tree 2 reference axis",
-                    ("Y", "X"),
-                    index=0 if tree2_axis == "Y" else 1,
-                    help="Tree 2 stays on one positive axis. A 1 ↔ 2 measurement sets its distance along this axis.",
-                    key=f"tree2_axis_{tree_form_revision}",
-                )
             left, right = st.columns(2)
             with left:
                 estimate_x = st.number_input("Initial X", min_value=0, value=int(current_x), step=100, disabled=tree_id == 1 or (tree_id == 2 and tree2_has_baseline), key=f"tree_x_{tree_form_revision}_{tree_id}")

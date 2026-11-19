@@ -116,6 +116,26 @@ def save_map_orientation(axis_layout, mirror_x, mirror_y):
     return info
 
 
+def set_tree2_reference_axis(axis):
+    """Move Tree 2 onto the selected positive axis while preserving its distance."""
+    axis = str(axis).upper()
+    if axis not in ("X", "Y"):
+        raise ValueError("Tree 2 reference axis must be X or Y.")
+    trees = load_trees()
+    measurements = load_measurements(trees)
+    baseline = [d for a, b, d in measurements if {a, b} == {1, 2}]
+    current_x, current_y = trees.get(2, (0, 1))
+    distance = int(round(sum(baseline) / len(baseline))) if baseline else int(round(max(current_x, current_y)))
+    if distance <= 0:
+        distance = 1
+    new_position = (distance, 0) if axis == "X" else (0, distance)
+    if trees.get(2) != new_position:
+        trees[2] = new_position
+        save_trees(trees)
+        mark_dataset_dirty()
+    return new_position
+
+
 def mark_tree_id_used(tree_id):
     info = load_dataset_info()
     info["next_tree_id"] = max(int(info.get("next_tree_id", 3)), int(tree_id) + 1)

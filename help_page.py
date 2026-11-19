@@ -11,8 +11,50 @@ def save_orientation_preferences():
         st.session_state["mirror_map_y"],
     )
 
+
+def save_tree2_axis():
+    storage.set_tree2_reference_axis(st.session_state["tree2_reference_axis"])
+
 render_page_title_selector("Help")
 st.caption("Record tree-to-tree tape distances and adjust the map with least squares. Enter coordinates and distances in millimetres.")
+
+tree2_position = storage.load_trees().get(2, (0, 1))
+tree2_reference_axis = "X" if tree2_position[0] > tree2_position[1] else "Y"
+st.session_state["tree2_reference_axis"] = tree2_reference_axis
+reference_axis_col, reference_diagram_col = st.columns([1, 1.4], vertical_alignment="center")
+with reference_axis_col:
+    st.selectbox(
+        "Tree 2 reference axis",
+        ("Y", "X"),
+        key="tree2_reference_axis",
+        on_change=save_tree2_axis,
+        help="Tree 2 lies on the selected positive survey axis. Its 1 ↔ 2 measurement sets the distance.",
+    )
+with reference_diagram_col:
+    is_x_axis = tree2_reference_axis == "X"
+    reference_figure = go.Figure()
+    reference_figure.add_trace(go.Scatter(
+        x=[0, 1 if is_x_axis else 0],
+        y=[0, 0 if is_x_axis else 1],
+        mode="lines+markers+text",
+        line={"color": "#94a3b8", "width": 2},
+        marker={"size": 18, "color": ["#2563eb", "#2563eb"]},
+        text=["1", "2"],
+        textposition="top center",
+        hoverinfo="skip",
+        showlegend=False,
+    ))
+    reference_figure.add_annotation(x=1.28, y=-0.12, text="+X", showarrow=False, font={"color": "#475569"})
+    reference_figure.add_annotation(x=-0.12, y=1.22, text="+Y", showarrow=False, font={"color": "#475569"})
+    reference_figure.update_layout(
+        height=180,
+        margin={"l": 10, "r": 20, "t": 8, "b": 8},
+        xaxis={"range": [-0.25, 1.45], "showgrid": False, "showticklabels": False, "zeroline": False},
+        yaxis={"range": [-0.25, 1.4], "showgrid": False, "showticklabels": False, "zeroline": False, "scaleanchor": "x", "scaleratio": 1},
+        showlegend=False,
+    )
+    st.plotly_chart(reference_figure, config={"displayModeBar": False, "responsive": True})
+st.caption("Tree 1 is the origin. Tree 2 is placed along the selected axis; the map’s swap and mirror settings can change how that direction appears on screen.")
 
 with st.expander("Map orientation and deviation alerts", expanded=True):
     st.selectbox(
@@ -72,7 +114,7 @@ with st.expander("Map orientation and deviation alerts", expanded=True):
 with st.expander("Set the map reference", expanded=True):
     st.markdown("""
     - Tree 1 is fixed at **(0, 0)**.
-    - Tree 2 lies on either the positive **X axis** or positive **Y axis**, selected in Tree management. The other coordinate stays at zero.
+    - Tree 2 lies on either the positive **X axis** or positive **Y axis**, selected above. The other coordinate stays at zero.
     - The Tree 1 ↔ Tree 2 baseline is a regular measurement. If you save Tree 2 with a nonzero starting coordinate before adding a baseline reading, the app creates a 1 → 2 measurement from that distance. Later baseline edits set Tree 2's coordinate to the measured distance on its selected axis.
     - The map keeps a small negative margin so the origin markers and axis remain visible.
     - Gray lines show recorded measurements. Amber trees need more links or a connection to the anchored network.

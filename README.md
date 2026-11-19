@@ -12,7 +12,7 @@ streamlit run app.py
 
 ## Field workflow
 
-1. Tree 1 is shown at the origin `(0, 0)`. Tree 2 anchors either the positive X or positive Y axis, selected in Tree management. Its 1 ↔ 2 distance is a regular measurement and sets Tree 2's coordinate on that axis.
+1. Tree 1 is shown at the origin `(0, 0)`. Tree 2 anchors either the positive X or positive Y axis, selected on the Help page, where a small diagram previews its direction. Its 1 ↔ 2 distance is a regular measurement and sets Tree 2's coordinate on that axis.
 2. Add trees from Tree management in the sidebar. Select an existing tree or the next available ID, tap a grid point to set its starting estimate, then press Add or Update. Tree 1 and Tree 2 are protected anchors. Use the map toggle to show or hide initial estimates.
 3. Record measured distances in millimetres. The live map draws each measured link and recalculates the network.
 4. Review amber trees for missing links or a disconnected network. Three or more links and a path to the anchor network are used as a practical field indicator that a tree has enough ties.
