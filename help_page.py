@@ -32,25 +32,28 @@ with reference_axis_col:
     )
 with reference_diagram_col:
     is_x_axis = tree2_reference_axis == "X"
+    tree2_x, tree2_y = (0.82, 0) if is_x_axis else (0, 0.82)
     reference_figure = go.Figure()
+    reference_figure.add_shape(type="line", x0=-0.18, y0=0, x1=1.12, y1=0, line={"color": "#64748b", "width": 2})
+    reference_figure.add_shape(type="line", x0=0, y0=-0.18, x1=0, y1=1.12, line={"color": "#64748b", "width": 2})
     reference_figure.add_trace(go.Scatter(
-        x=[0, 1 if is_x_axis else 0],
-        y=[0, 0 if is_x_axis else 1],
+        x=[0, tree2_x],
+        y=[0, tree2_y],
         mode="lines+markers+text",
         line={"color": "#94a3b8", "width": 2},
         marker={"size": 18, "color": ["#2563eb", "#2563eb"]},
-        text=["1", "2"],
-        textposition="top center",
+        text=["1 · origin", "2"],
+        textposition=["bottom right", "top center"],
         hoverinfo="skip",
         showlegend=False,
     ))
-    reference_figure.add_annotation(x=1.28, y=-0.12, text="+X", showarrow=False, font={"color": "#475569"})
-    reference_figure.add_annotation(x=-0.12, y=1.22, text="+Y", showarrow=False, font={"color": "#475569"})
+    reference_figure.add_annotation(x=1.02, y=-0.12, text="+X", showarrow=False, font={"color": "#475569"})
+    reference_figure.add_annotation(x=-0.13, y=1.02, text="+Y", showarrow=False, font={"color": "#475569"})
     reference_figure.update_layout(
-        height=180,
-        margin={"l": 10, "r": 20, "t": 8, "b": 8},
-        xaxis={"range": [-0.25, 1.45], "showgrid": False, "showticklabels": False, "zeroline": False},
-        yaxis={"range": [-0.25, 1.4], "showgrid": False, "showticklabels": False, "zeroline": False, "scaleanchor": "x", "scaleratio": 1},
+        height=210,
+        margin={"l": 20, "r": 20, "t": 12, "b": 16},
+        xaxis={"range": [-0.28, 1.18], "showgrid": False, "showticklabels": False, "zeroline": False},
+        yaxis={"range": [-0.28, 1.18], "showgrid": False, "showticklabels": False, "zeroline": False, "scaleanchor": "x", "scaleratio": 1},
         showlegend=False,
     )
     st.plotly_chart(reference_figure, config={"displayModeBar": False, "responsive": True})
