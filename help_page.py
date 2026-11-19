@@ -1,7 +1,62 @@
 import streamlit as st
+import plotly.graph_objects as go
 
 st.title("Field survey help")
-st.caption("How to record a tree network, place starting estimates, and review the least-squares adjustment.")
+st.caption("Record tree-to-tree tape distances and adjust the map with least squares. Enter coordinates and distances in millimetres.")
+
+with st.expander("Map orientation and deviation alerts", expanded=True):
+    st.selectbox(
+        "Map axes",
+        ("X horizontal, Y vertical", "Y horizontal, X vertical"),
+        key="map_axis_layout",
+        help="Changes the map display only. Tree coordinates remain in their original X and Y fields.",
+    )
+    mirror_col_x, mirror_col_y = st.columns(2)
+    with mirror_col_x:
+        st.checkbox("Mirror X", key="mirror_map_x", help="Show positive X toward the opposite side of the map.")
+    with mirror_col_y:
+        st.checkbox("Mirror Y", key="mirror_map_y", help="Show positive Y toward the opposite side of the map.")
+
+    swap_axes = st.session_state.get("map_axis_layout", "X horizontal, Y vertical") == "Y horizontal, X vertical"
+    mirror_x = bool(st.session_state.get("mirror_map_x", False))
+    mirror_y = bool(st.session_state.get("mirror_map_y", False))
+    horizontal_axis = "Y" if swap_axes else "X"
+    vertical_axis = "X" if swap_axes else "Y"
+    horizontal_mirrored = mirror_y if swap_axes else mirror_x
+    vertical_mirrored = mirror_x if swap_axes else mirror_y
+    horizontal_sign = -1 if horizontal_mirrored else 1
+    vertical_sign = -1 if vertical_mirrored else 1
+
+    orientation_diagram = go.Figure()
+    orientation_diagram.add_shape(
+        type="rect",
+        x0=0 if horizontal_sign > 0 else -1,
+        x1=1 if horizontal_sign > 0 else 0,
+        y0=0 if vertical_sign > 0 else -1,
+        y1=1 if vertical_sign > 0 else 0,
+        fillcolor="rgba(34,197,94,0.22)",
+        line={"color": "rgba(34,197,94,0.55)", "width": 1},
+        layer="below",
+    )
+    orientation_diagram.add_trace(go.Scatter(x=[-1.05, 1.05], y=[0, 0], mode="lines", line={"color": "#64748b", "width": 2}, hoverinfo="skip", showlegend=False))
+    orientation_diagram.add_trace(go.Scatter(x=[0, 0], y=[-1.05, 1.05], mode="lines", line={"color": "#64748b", "width": 2}, hoverinfo="skip", showlegend=False))
+    orientation_diagram.add_annotation(x=horizontal_sign * 0.77, y=0.08, text=f"+{horizontal_axis}", showarrow=False, font={"color": "#166534", "size": 13})
+    orientation_diagram.add_annotation(x=-horizontal_sign * 0.77, y=0.08, text=f"−{horizontal_axis}", showarrow=False, font={"color": "#64748b", "size": 12})
+    orientation_diagram.add_annotation(x=0.12, y=vertical_sign * 0.78, text=f"+{vertical_axis}", showarrow=False, font={"color": "#166534", "size": 13})
+    orientation_diagram.add_annotation(x=0.12, y=-vertical_sign * 0.78, text=f"−{vertical_axis}", showarrow=False, font={"color": "#64748b", "size": 12})
+    orientation_diagram.update_layout(
+        height=250,
+        margin={"l": 20, "r": 20, "t": 15, "b": 15},
+        xaxis={"range": [-1.1, 1.1], "showgrid": False, "showticklabels": False, "zeroline": False, "title": None},
+        yaxis={"range": [-1.1, 1.1], "showgrid": False, "showticklabels": False, "zeroline": False, "title": None, "scaleanchor": "x", "scaleratio": 1},
+        showlegend=False,
+    )
+    st.plotly_chart(orientation_diagram, config={"displayModeBar": False, "responsive": True})
+    st.caption("Green shading marks the active positive-coordinate area. Mirroring or swapping changes the map view, not the stored estimates.")
+
+    st.subheader("Deviation alerts")
+    st.number_input("Moderate distance residual (mm)", min_value=0.0, value=50.0, step=10.0, key="distance_tolerance")
+    st.number_input("Large shift from estimate (mm)", min_value=0.0, value=1000.0, step=100.0, key="estimate_tolerance")
 
 with st.expander("Set the map reference", expanded=True):
     st.markdown("""
@@ -50,5 +105,5 @@ with st.expander("Back up and transfer a dataset"):
     - Choose **Start a new dataset** in the sidebar to finish the current survey and start fresh with Trees 1 and 2 as anchors. Its first available tree ID is 3, and the dataset receives a new serial number.
     - The sidebar shows whether changes have been included in a requested backup. Download the complete dataset ZIP regularly; it preserves the dataset identity, tree estimates, measurements, and retired Tree ID sequence.
     - Upload a saved ZIP in the sidebar to replace the active dataset. The app shows a replacement warning and requires confirmation before loading it.
-    - The CSV exports are convenient for spreadsheet review. Use the ZIP to restore a survey in this app.
+    - Open **Data management** to rename, back up, upload, or start a dataset. The CSV exports there are convenient for spreadsheet review; use the ZIP to restore a survey in this app.
     """)

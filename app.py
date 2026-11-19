@@ -1,4 +1,5 @@
 import streamlit as st
+import storage
 
 st.set_page_config(
     page_title="Live Field Survey Network",
@@ -12,8 +13,17 @@ st.markdown("""
 /* Keep the app header, including the sidebar toggle, reachable on long pages. */
 [data-testid="stHeader"] { position: sticky; top: 0; z-index: 1000; }
 [data-testid="stSidebar"] > div:first-child { overflow-y: auto; }
+section.main .block-container { padding-top: 1rem; padding-bottom: 1rem; gap: 0.7rem; }
+section.main [data-testid="stVerticalBlock"] { gap: 0.7rem; }
 </style>
 """, unsafe_allow_html=True)
+
+storage.init_files()
+active_dataset = storage.load_dataset_info()
+with st.sidebar:
+    st.title("🌳 Live Field Survey")
+    st.caption(active_dataset["dataset_id"])
+    st.divider()
 
 # Ensure data arrays survive page-swaps in global context memory
 if "survey_ledger" not in st.session_state:
@@ -31,6 +41,7 @@ data_entry_page = st.Page(
 )
 
 help_page = st.Page(page="help_page.py", title="Help", icon="❔")
+data_management_page = st.Page(page="data_management.py", title="Data management", icon="🗂️")
 
-pg = st.navigation([data_entry_page, help_page])
+pg = st.navigation([data_entry_page, help_page, data_management_page])
 pg.run()
