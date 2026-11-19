@@ -83,7 +83,7 @@ with st.expander("Dataset", expanded=True):
                 if st.button("Replace active dataset", type="primary", disabled=not confirmed, key=f"replace_dataset_{upload_token}"):
                     source_serial = pending_upload["source_serial"]
                     minimum_serial = source_serial + 1 if source_serial is not None else None
-                    storage.replace_dataset(pending_upload["name"], pending_upload["trees"], pending_upload["measurements"], minimum_serial=minimum_serial, next_tree_id=pending_upload["next_tree_id"])
+                    storage.replace_dataset(pending_upload["name"], pending_upload["trees"], pending_upload["measurements"], minimum_serial=minimum_serial, next_tree_id=pending_upload["next_tree_id"], map_orientation=pending_upload["map_orientation"])
                     st.session_state["tree_editor_values"] = {"id": pending_upload["next_tree_id"], "x": 0, "y": 0}
                     st.session_state["tree_form_revision"] = st.session_state.get("tree_form_revision", 0) + 1
                     st.session_state["dataset_upload_revision"] = upload_revision + 1

@@ -19,6 +19,11 @@ def build_dataset_bundle(dataset_info, trees, measurements):
         "dataset_id": dataset_info["dataset_id"],
         "serial": int(dataset_info["serial"]),
         "next_tree_id": int(dataset_info.get("next_tree_id", max(trees, default=2) + 1)),
+        "map_orientation": {
+            "map_axis_layout": dataset_info.get("map_axis_layout", storage.DEFAULT_MAP_ORIENTATION["map_axis_layout"]),
+            "mirror_map_x": bool(dataset_info.get("mirror_map_x", False)),
+            "mirror_map_y": bool(dataset_info.get("mirror_map_y", False)),
+        },
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "distance_unit": "mm",
         "coordinate_unit": "mm",
@@ -111,11 +116,23 @@ def parse_dataset_bundle(upload_bytes):
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("The manifest next_tree_id must be a positive integer.") from exc
     source_next_tree_id = max(max(trees) + 1, 3, source_next_tree_id)
+    map_orientation = manifest.get("map_orientation", {})
+    if not isinstance(map_orientation, dict):
+        map_orientation = {}
+    axis_layout = map_orientation.get("map_axis_layout", storage.DEFAULT_MAP_ORIENTATION["map_axis_layout"])
+    if axis_layout not in ("X horizontal, Y vertical", "Y horizontal, X vertical"):
+        axis_layout = storage.DEFAULT_MAP_ORIENTATION["map_axis_layout"]
+    map_orientation = {
+        "map_axis_layout": axis_layout,
+        "mirror_map_x": map_orientation.get("mirror_map_x") is True,
+        "mirror_map_y": map_orientation.get("mirror_map_y") is True,
+    }
     return {
         "name": name,
         "source_id": str(manifest.get("dataset_id", "Unknown dataset")),
         "source_serial": source_serial,
         "next_tree_id": source_next_tree_id,
+        "map_orientation": map_orientation,
         "trees": trees,
         "measurements": measurements,
     }

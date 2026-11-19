@@ -1,6 +1,15 @@
 import streamlit as st
 import plotly.graph_objects as go
+import storage
 from page_navigation import render_page_title_selector
+
+
+def save_orientation_preferences():
+    storage.save_map_orientation(
+        st.session_state["map_axis_layout"],
+        st.session_state["mirror_map_x"],
+        st.session_state["mirror_map_y"],
+    )
 
 render_page_title_selector("Help")
 st.caption("Record tree-to-tree tape distances and adjust the map with least squares. Enter coordinates and distances in millimetres.")
@@ -10,13 +19,14 @@ with st.expander("Map orientation and deviation alerts", expanded=True):
         "Map axes",
         ("X horizontal, Y vertical", "Y horizontal, X vertical"),
         key="map_axis_layout",
+        on_change=save_orientation_preferences,
         help="Changes the map display only. Tree coordinates remain in their original X and Y fields.",
     )
     mirror_col_x, mirror_col_y = st.columns(2)
     with mirror_col_x:
-        st.checkbox("Mirror X", key="mirror_map_x", help="Show positive X toward the opposite side of the map.")
+        st.checkbox("Mirror X", key="mirror_map_x", on_change=save_orientation_preferences, help="Show positive X toward the opposite side of the map.")
     with mirror_col_y:
-        st.checkbox("Mirror Y", key="mirror_map_y", help="Show positive Y toward the opposite side of the map.")
+        st.checkbox("Mirror Y", key="mirror_map_y", on_change=save_orientation_preferences, help="Show positive Y toward the opposite side of the map.")
 
     swap_axes = st.session_state.get("map_axis_layout", "X horizontal, Y vertical") == "Y horizontal, X vertical"
     mirror_x = bool(st.session_state.get("mirror_map_x", False))

@@ -10,6 +10,11 @@ DATA_FILE = Path("survey_data.csv")
 TREES_FILE = Path("active_trees.csv")
 DATASET_FILE = Path("dataset_info.json")
 SERIAL_FILE = Path("dataset_serial.json")
+DEFAULT_MAP_ORIENTATION = {
+    "map_axis_layout": "X horizontal, Y vertical",
+    "mirror_map_x": False,
+    "mirror_map_y": False,
+}
 
 
 def init_files():
@@ -41,6 +46,7 @@ def init_dataset_info():
             "serial": initial_serial,
             "dataset_id": _dataset_id("Field Survey", initial_serial),
             "next_tree_id": max(3, max_tree_id + 1),
+            **DEFAULT_MAP_ORIENTATION,
             "not_downloaded": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -52,6 +58,8 @@ def init_dataset_info():
         info["next_tree_id"] = max(3, max_tree_id + 1)
     else:
         info["next_tree_id"] = max(3, int(info["next_tree_id"]))
+    for setting, default in DEFAULT_MAP_ORIENTATION.items():
+        info.setdefault(setting, default)
     next_serial = int(info.get("serial", 0)) + 1
     if SERIAL_FILE.exists():
         registry = json.loads(SERIAL_FILE.read_text(encoding="utf-8"))
@@ -95,6 +103,19 @@ def mark_dataset_downloaded():
     save_dataset_info(info)
 
 
+def save_map_orientation(axis_layout, mirror_x, mirror_y):
+    """Persist map display orientation as part of the active dataset backup."""
+    info = load_dataset_info()
+    info["map_axis_layout"] = axis_layout if axis_layout in (
+        "X horizontal, Y vertical", "Y horizontal, X vertical"
+    ) else DEFAULT_MAP_ORIENTATION["map_axis_layout"]
+    info["mirror_map_x"] = bool(mirror_x)
+    info["mirror_map_y"] = bool(mirror_y)
+    info["not_downloaded"] = True
+    save_dataset_info(info)
+    return info
+
+
 def mark_tree_id_used(tree_id):
     info = load_dataset_info()
     info["next_tree_id"] = max(int(info.get("next_tree_id", 3)), int(tree_id) + 1)
@@ -102,7 +123,7 @@ def mark_tree_id_used(tree_id):
     save_dataset_info(info)
 
 
-def replace_dataset(name, trees_dict, measurements, minimum_serial=None, next_tree_id=None):
+def replace_dataset(name, trees_dict, measurements, minimum_serial=None, next_tree_id=None, map_orientation=None):
     """Replace the active survey and assign a fresh, monotonically increasing serial."""
     trees_dict = dict(trees_dict)
     if 1 not in trees_dict or 2 not in trees_dict:
@@ -117,6 +138,7 @@ def replace_dataset(name, trees_dict, measurements, minimum_serial=None, next_tr
         "name": str(name).strip() or "Imported Survey",
         "serial": serial,
         "next_tree_id": max(max(trees_dict) + 1, int(next_tree_id or 3)),
+        **{**DEFAULT_MAP_ORIENTATION, **(map_orientation or {})},
         "not_downloaded": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "imported_at": datetime.now(timezone.utc).isoformat(),
