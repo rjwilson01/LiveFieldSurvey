@@ -1,3 +1,7 @@
+import faulthandler
+
+faulthandler.enable()
+
 import streamlit as st
 import storage
 from page_navigation import PAGE_TITLES
