@@ -3,6 +3,7 @@ scipy
 matplotlib
 plotly
 streamlit[auth]>=1.53
+pyarrow<25.0
 pandas
 google-auth
 google-api-python-client
