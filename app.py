@@ -19,6 +19,29 @@ section.main [data-testid="stVerticalBlock"] { gap: 0.7rem; }
 </style>
 """, unsafe_allow_html=True)
 
+try:
+    is_logged_in = st.user.is_logged_in
+except AttributeError:
+    st.error("Google sign-in is not configured. Follow the OAuth setup in README.md and add it to Streamlit Secrets.")
+    st.stop()
+
+if not is_logged_in:
+    st.title("🌳 Live Field Survey")
+    st.write("Sign in with your Google account to access the survey spreadsheets in your configured Drive folder.")
+    st.button("Sign in with Google", on_click=st.login, type="primary")
+    st.stop()
+
+try:
+    allowed_email = str(st.secrets["google_sheets"]["allowed_email"]).strip().lower()
+except (KeyError, FileNotFoundError):
+    st.error("Set google_sheets.allowed_email in Streamlit Secrets to the Google account that owns the survey folder.")
+    st.stop()
+
+if str(st.user.get("email", "")).strip().lower() != allowed_email:
+    st.error("This app is restricted to the Google account configured for the survey folder.")
+    st.button("Sign out", on_click=st.logout)
+    st.stop()
+
 def select_active_dataset():
     st.session_state["active_spreadsheet_id"] = st.session_state["dataset_selector"]
 
@@ -26,8 +49,13 @@ def select_active_dataset():
 try:
     datasets = storage.list_datasets()
 except Exception as exc:
-    st.error("Google Sheets storage could not be reached.")
-    st.info("Configure the service account and shared Drive folder described in README.md, then reload the app.")
+    status = getattr(getattr(exc, "resp", None), "status", None)
+    if status == 401:
+        st.error("Your Google API access token has expired. Sign out and sign in again to reconnect.")
+        st.button("Sign out and reconnect", on_click=st.logout)
+    else:
+        st.error("Google Sheets storage could not be reached.")
+        st.info("Check the Google OAuth settings, requested scopes, and configured Drive folder in README.md.")
     st.exception(exc)
     st.stop()
 
@@ -59,6 +87,7 @@ if st.session_state.get("dataset_selector") not in dataset_by_id or pending_data
 
 with st.sidebar:
     st.title("🌳 Live Field Survey")
+    st.button("Sign out", on_click=st.logout)
     st.selectbox(
         "Dataset spreadsheet",
         options=dataset_ids,

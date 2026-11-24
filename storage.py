@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import re
 
 import streamlit as st
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 
@@ -26,22 +26,33 @@ class StorageConfigurationError(RuntimeError):
     """Raised when the Google Sheets connection is not configured."""
 
 
-@st.cache_resource(show_spinner=False)
 def _google_services():
     try:
-        account_info = dict(st.secrets["gcp_service_account"])
         folder_id = str(st.secrets["google_sheets"]["folder_id"]).strip()
     except (KeyError, FileNotFoundError) as exc:
         raise StorageConfigurationError(
-            "Google Sheets storage is not configured. Add gcp_service_account and "
-            "google_sheets.folder_id to Streamlit secrets."
+            "Google Sheets storage is not configured. Add the [auth] Google OAuth settings "
+            "and google_sheets.folder_id to Streamlit secrets."
         ) from exc
     if not folder_id:
-        raise StorageConfigurationError("Set google_sheets.folder_id to a Drive folder shared with the service account.")
+        raise StorageConfigurationError("Set google_sheets.folder_id to the Drive folder for survey spreadsheets.")
 
-    credentials = service_account.Credentials.from_service_account_info(account_info, scopes=SCOPES)
+    try:
+        access_token = st.user.tokens["access"]
+    except (AttributeError, KeyError, TypeError) as exc:
+        raise StorageConfigurationError("Sign in with Google and grant Drive and Sheets access to continue.") from exc
+    cached = st.session_state.get("_google_sheets_services")
+    if cached and cached.get("access_token") == access_token:
+        return cached["sheets"], cached["drive"], folder_id
+
+    credentials = Credentials(token=access_token, scopes=SCOPES)
     sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
     drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    st.session_state["_google_sheets_services"] = {
+        "access_token": access_token,
+        "sheets": sheets,
+        "drive": drive,
+    }
     return sheets, drive, folder_id
 
 
