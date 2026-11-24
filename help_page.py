@@ -166,10 +166,10 @@ with st.expander("Map legend and calculated locations"):
     - Use **Show initial estimates** to compare the saved starting positions with adjusted positions. Use **Show placement targets** to make the faint tap grid visible or hide it for easier line selection. Both choices stay selected as you work on the map.
     """)
 
-with st.expander("Google Sheets datasets"):
+with st.expander("Datasets and storage"):
     st.markdown("""
-    - Choose a survey spreadsheet from the sidebar to switch datasets.
-    - Open **Data management** to create a new spreadsheet dataset or rename the active one.
-    - The app writes tree positions, measurements, dataset identity, and map settings directly to Google Sheets as you work. There is no separate Save or CSV import/export step.
-    - Each survey spreadsheet has `Trees`, `Measurements`, and `Dataset` tabs. You can open the active workbook directly from Data management.
+    - Choose a survey dataset from the sidebar to switch datasets.
+    - Open **Data management** to create a dataset or rename the active one.
+    - Tree positions, measurements, dataset identity, and map settings are saved directly to Neon PostgreSQL as you work.
+    - Existing Google Sheets datasets can be copied into Neon from **Data management**. The source workbooks are left unchanged and can be opened there as a reference.
     """)

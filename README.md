@@ -1,35 +1,31 @@
 # Live Field Survey
 
-A Streamlit tool for recording tree-to-tree tape measurements and calculating adjusted tree positions with a least-squares network adjustment. Survey data is stored directly in Google Sheets, with one spreadsheet per dataset.
+A Streamlit tool for recording tree-to-tree tape measurements and calculating adjusted tree positions with a least-squares network adjustment. Survey datasets are stored in Neon PostgreSQL. Existing Google Sheets workbooks can be copied into Neon without changing the originals.
 
-## Configure Google Sheets access
+## Neon setup
 
-The app signs in with your Google account using OAuth so newly created spreadsheets belong to you in My Drive. In the Google Cloud project, enable the Google Sheets API and Google Drive API, configure the OAuth consent screen, and create an OAuth client ID with application type **Web application**. Add the Streamlit app URL with `/oauth2callback` as an authorized redirect URI. If the consent screen is in testing mode, add your Google account as a test user.
+The project is linked to Neon project `curly-cake-12589954`, branch `production`. PostgreSQL is included on every Neon project. `neon.ts` contains the branch policy used by `neon deploy`.
 
-For Streamlit Community Cloud, add these settings to the app's **Secrets**. For local development, save them in `.streamlit/secrets.toml`. Never commit OAuth secrets to Git.
+The Neon CLI writes the pooled app connection string (`DATABASE_URL`) and the direct migration connection string (`DATABASE_URL_UNPOOLED`) to `.env.local`. Keep that file private; it is ignored by Git. Local runs load it automatically. In Streamlit Community Cloud, add both values as top-level Secrets:
 
 ```toml
-[auth]
-redirect_uri = "https://YOUR-APP.streamlit.app/oauth2callback"
-cookie_secret = "A_LONG_RANDOM_SECRET"
-client_id = "YOUR_OAUTH_CLIENT_ID"
-client_secret = "YOUR_OAUTH_CLIENT_SECRET"
-server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
-expose_tokens = ["access"]
-client_kwargs = { "scope" = "openid email profile https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets" }
-
-[google_sheets]
-folder_id = "YOUR_DRIVE_FOLDER_ID"
-allowed_email = "YOUR_GOOGLE_ACCOUNT_EMAIL"
+DATABASE_URL = "YOUR_NEON_POOLED_CONNECTION_STRING"
+DATABASE_URL_UNPOOLED = "YOUR_NEON_DIRECT_CONNECTION_STRING"
 ```
 
-Google OAuth grants the app the requested Drive scope. The app checks the signed-in email against `allowed_email` and uses the configured `folder_id` for its spreadsheet list and file operations. The Drive scope itself is broad; it is not enforced at the individual-folder permission level.
+Use the pooled URL for normal app connections. Schema migrations prefer the direct URL. The app applies the checked-in SQL migration from `migrations/` once per database schema version.
 
-The `_LiveFieldSurvey Registry` spreadsheet in the folder tracks the next dataset serial so IDs are not reused if a dataset spreadsheet is later removed. Once OAuth is configured and working, remove the old `[gcp_service_account]` block from Streamlit Secrets and delete its unused key in Google Cloud.
+## Sign-in and Google Sheets migration
+
+Keep the existing `[auth]` OAuth settings and `[google_sheets]` settings in Streamlit Secrets for the initial migration. Google sign-in still restricts access to the account in `google_sheets.allowed_email`. Drive and Sheets API access is retained only to copy existing workbooks into Neon. The migration button appears when the configured folder and Google API token are available. It copies each workbook's dataset metadata, starting estimates, directed measurements, and next dataset serial. It does not delete or modify source workbooks. Repeating the import skips workbooks already copied.
+
+After the data has been copied and verified, the Google Drive and Sheets API scopes and folder settings can be removed. Google sign-in can remain for app access control.
+
+For Streamlit Community Cloud, keep the OAuth settings in the app's **Secrets**. The OAuth client redirect URI must be the app URL followed by `/oauth2callback`. Never commit OAuth secrets or database URLs to Git.
 
 ## Run locally
 
-Install the packages from `requirements.txt`, configure the OAuth secrets above, then run:
+Install the packages from `requirements.txt`, configure `.streamlit/secrets.toml` for Google sign-in, and ensure `.env.local` contains the Neon variables. Then run:
 
 ```bash
 streamlit run app.py
@@ -37,13 +33,11 @@ streamlit run app.py
 
 ## Field workflow
 
-1. Sign in with the Google account listed in `allowed_email`. Select a dataset spreadsheet from the sidebar. Create a new dataset from **Data management**; this creates a workbook with `Trees`, `Measurements`, and `Dataset` tabs.
-2. Tree 1 is fixed at the origin. Tree 2 anchors either the positive X or positive Y axis; set this on the Help page. Its 1 ↔ 2 distance is a regular measurement and sets its coordinate on that axis.
+1. Sign in with the configured Google account and select a dataset from the sidebar. Copy existing Google Sheets datasets from **Data management**, or create a new dataset there.
+2. Tree 1 is fixed at the origin. Tree 2 anchors either the positive X or positive Y axis; set this on the Help page. Its 1 ↔ 2 distance sets its coordinate on that axis.
 3. Add trees from Tree management in the sidebar. Choose an existing tree or the next available ID, tap a placement target to set a starting estimate, then press Add or Update.
-4. Record measured distances in millimetres. The live map draws each measured link and recalculates the network. Edits are written immediately to the selected spreadsheet.
-5. Review amber trees for missing links or a disconnected network. Three or more links and a path to the anchor network are used as a practical field indicator that a tree has enough ties.
-6. Review distance residual warnings and large shifts from saved estimates. Both alert thresholds can be changed on the Help page.
+4. Record measured distances in millimetres. The live map draws each measured link and recalculates the network. Edits are written to Neon as you work.
 
-One measurement is allowed per direction: `2 → 4` and `4 → 2` can both exist, but a second `2 → 4` updates the existing row. The review table groups records by unordered pair while preserving direction. Its short headings are `Meas`, `Adj`, and `Δ`; residuals are rounded to whole millimetres. Click a table row or map line to select a record. Measurement edits, tree estimates, and map orientation are saved directly to Google Sheets.
+One measurement is allowed per direction: `2 → 4` and `4 → 2` can both exist, but a second `2 → 4` updates the existing row. Measurement rows group by unordered pair while preserving direction. The short headings are `Meas`, `Adj`, and `Δ`; residuals are rounded to whole millimetres. Click a row or map line to select a record.
 
-Each dataset workbook has a `Trees` tab for initial coordinates, a `Measurements` tab for directed distance readings, and a `Dataset` tab for its name, unique serial, next tree ID, and display settings. The app does not need an export/import CSV or a separate Save action. Google Sheets is the durable store; use Drive's own version history or file-copy features if you need a manual backup.
+Each Neon dataset has a unique dataset name and serial, tree starting estimates, directed measurements, map orientation, and settings. Tree IDs are never reused; Trees 1 and 2 are protected anchors.
