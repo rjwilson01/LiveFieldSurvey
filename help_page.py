@@ -166,10 +166,10 @@ with st.expander("Map legend and calculated locations"):
     - Use **Show initial estimates** to compare the saved starting positions with adjusted positions. Use **Show placement targets** to make the faint tap grid visible or hide it for easier line selection. Both choices stay selected as you work on the map.
     """)
 
-with st.expander("Back up and transfer a dataset"):
+with st.expander("Google Sheets datasets"):
     st.markdown("""
-    - Choose **Start a new dataset** in the sidebar to finish the current survey and start fresh with Trees 1 and 2 as anchors. Its first available tree ID is 3, and the dataset receives a new serial number.
-    - The sidebar shows whether changes have been included in a requested backup. Download the complete dataset ZIP regularly; it preserves the dataset identity, tree estimates, measurements, and retired Tree ID sequence.
-    - Upload a saved ZIP in the sidebar to replace the active dataset. The app shows a replacement warning and requires confirmation before loading it.
-    - Open **Data management** to rename, back up, upload, or start a dataset. The CSV exports there are convenient for spreadsheet review; use the ZIP to restore a survey in this app.
+    - Choose a survey spreadsheet from the sidebar to switch datasets.
+    - Open **Data management** to create a new spreadsheet dataset or rename the active one.
+    - The app writes tree positions, measurements, dataset identity, and map settings directly to Google Sheets as you work. There is no separate Save or CSV import/export step.
+    - Each survey spreadsheet has `Trees`, `Measurements`, and `Dataset` tabs. You can open the active workbook directly from Data management.
     """)

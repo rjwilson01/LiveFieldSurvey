@@ -20,7 +20,6 @@ duplicate_measurements_collapsed = len(measurements) - len(directed_measurements
 if duplicate_measurements_collapsed:
     measurements = [(a, b, distance) for (a, b), distance in directed_measurements.items()]
     storage.save_measurements(measurements)
-    storage.mark_dataset_dirty()
 
 
 def sync_tree2_to_baseline():
@@ -35,7 +34,6 @@ def sync_tree2_to_baseline():
         return False
     trees[2] = baseline_position
     storage.save_trees(trees)
-    storage.mark_dataset_dirty()
     return True
 
 
@@ -44,13 +42,11 @@ tree_ids = sorted(trees)
 
 def persist_trees():
     storage.save_trees(trees)
-    storage.mark_dataset_dirty()
 
 def persist_measurements():
     storage.save_measurements(measurements)
     # The solver constrains Tree 2 to the mean baseline on its selected axis.
     sync_tree2_to_baseline()
-    storage.mark_dataset_dirty()
 
 dataset_info = storage.load_dataset_info()
 coords, solver_info = solver.run_network_adjustment(trees, measurements)

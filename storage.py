@@ -1,117 +1,266 @@
-"""CSV persistence for the tree survey."""
+"""Google Sheets persistence for survey datasets."""
 
 from datetime import datetime, timezone
-import json
-from pathlib import Path
 import re
-import pandas as pd
 
-DATA_FILE = Path("survey_data.csv")
-TREES_FILE = Path("active_trees.csv")
-DATASET_FILE = Path("dataset_info.json")
-SERIAL_FILE = Path("dataset_serial.json")
+import streamlit as st
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
+
 DEFAULT_MAP_ORIENTATION = {
     "map_axis_layout": "X horizontal, Y vertical",
     "mirror_map_x": False,
     "mirror_map_y": False,
 }
+SHEETS_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
+DATASET_SHEETS = ("Trees", "Measurements", "Dataset")
+REGISTRY_TITLE = "_LiveFieldSurvey Registry"
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+
+class StorageConfigurationError(RuntimeError):
+    """Raised when the Google Sheets connection is not configured."""
+
+
+@st.cache_resource(show_spinner=False)
+def _google_services():
+    try:
+        account_info = dict(st.secrets["gcp_service_account"])
+        folder_id = str(st.secrets["google_sheets"]["folder_id"]).strip()
+    except (KeyError, FileNotFoundError) as exc:
+        raise StorageConfigurationError(
+            "Google Sheets storage is not configured. Add gcp_service_account and "
+            "google_sheets.folder_id to Streamlit secrets."
+        ) from exc
+    if not folder_id:
+        raise StorageConfigurationError("Set google_sheets.folder_id to a Drive folder shared with the service account.")
+
+    credentials = service_account.Credentials.from_service_account_info(account_info, scopes=SCOPES)
+    sheets = build("sheets", "v4", credentials=credentials, cache_discovery=False)
+    drive = build("drive", "v3", credentials=credentials, cache_discovery=False)
+    return sheets, drive, folder_id
 
 
 def init_files():
-    # A blank survey is safer than silently adding example measurements.
-    if not TREES_FILE.exists():
-        save_trees({1: (0.0, 0.0), 2: (0.0, 1.0)})
-    if not DATA_FILE.exists():
-        save_measurements([])
-    init_dataset_info()
+    """Compatibility entry point; data is now read and written directly to Sheets."""
+    _google_services()
 
 
-def _write_json(path, content):
-    path.write_text(json.dumps(content, indent=2), encoding="utf-8")
+def _active_spreadsheet_id(spreadsheet_id=None):
+    selected = spreadsheet_id or st.session_state.get("active_spreadsheet_id")
+    if not selected:
+        raise StorageConfigurationError("Select or create a Google Sheets dataset before editing survey data.")
+    return str(selected)
 
 
-def _dataset_id(name, serial):
-    return f"{name.strip()}-{int(serial):03d}"
+def _get_values(spreadsheet_id, worksheet, cell_range="A1:Z"):
+    sheets, _, _ = _google_services()
+    result = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{worksheet}'!{cell_range}",
+    ).execute()
+    return result.get("values", [])
 
 
-def init_dataset_info():
-    """Create current dataset identity and its next serial counter if absent."""
-    if not DATASET_FILE.exists():
-        existing_registry = json.loads(SERIAL_FILE.read_text(encoding="utf-8")) if SERIAL_FILE.exists() else {}
-        initial_serial = max(1, int(existing_registry.get("next_serial", 1)))
-        tree_frame = pd.read_csv(TREES_FILE)
-        max_tree_id = int(pd.to_numeric(tree_frame["tree"], errors="coerce").max()) if not tree_frame.empty else 2
-        info = {
-            "name": "Field Survey",
-            "serial": initial_serial,
-            "dataset_id": _dataset_id("Field Survey", initial_serial),
-            "next_tree_id": max(3, max_tree_id + 1),
-            **DEFAULT_MAP_ORIENTATION,
-            "not_downloaded": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        _write_json(DATASET_FILE, info)
-    info = json.loads(DATASET_FILE.read_text(encoding="utf-8"))
-    if "next_tree_id" not in info:
-        tree_frame = pd.read_csv(TREES_FILE)
-        max_tree_id = int(pd.to_numeric(tree_frame["tree"], errors="coerce").max()) if not tree_frame.empty else 2
-        info["next_tree_id"] = max(3, max_tree_id + 1)
-    else:
-        info["next_tree_id"] = max(3, int(info["next_tree_id"]))
-    for setting, default in DEFAULT_MAP_ORIENTATION.items():
-        info.setdefault(setting, default)
-    next_serial = int(info.get("serial", 0)) + 1
-    if SERIAL_FILE.exists():
-        registry = json.loads(SERIAL_FILE.read_text(encoding="utf-8"))
-        next_serial = max(next_serial, int(registry.get("next_serial", 1)))
-    _write_json(SERIAL_FILE, {"next_serial": next_serial})
-    _write_json(DATASET_FILE, info)
+def _write_values(spreadsheet_id, worksheet, values):
+    sheets, _, _ = _google_services()
+    sheets.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{worksheet}'!A:Z",
+        body={},
+    ).execute()
+    sheets.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"'{worksheet}'!A1",
+        valueInputOption="RAW",
+        body={"values": values},
+    ).execute()
+
+
+def _list_drive_files():
+    _, drive, folder_id = _google_services()
+    files = []
+    page_token = None
+    while True:
+        result = drive.files().list(
+            q=f"'{folder_id}' in parents and mimeType = '{SHEETS_MIME_TYPE}' and trashed = false",
+            pageSize=1000,
+            pageToken=page_token,
+            orderBy="name",
+            fields="nextPageToken,files(id,name,mimeType,webViewLink,modifiedTime)",
+        ).execute()
+        files.extend(result.get("files", []))
+        page_token = result.get("nextPageToken")
+        if not page_token:
+            return files
+
+
+def _dataset_title_parts(title):
+    match = re.match(r"^(.*)-(\d{3,})$", str(title))
+    if not match:
+        return None
+    return match.group(1), int(match.group(2))
+
+
+def list_datasets():
+    """List survey workbooks in the configured Drive folder."""
+    datasets = []
+    for file in _list_drive_files():
+        if file.get("name") == REGISTRY_TITLE:
+            continue
+        parts = _dataset_title_parts(file.get("name", ""))
+        if not parts:
+            continue
+        name, serial = parts
+        datasets.append({
+            "spreadsheet_id": file["id"],
+            "dataset_id": file["name"],
+            "name": name,
+            "serial": serial,
+            "url": file.get("webViewLink", f"https://docs.google.com/spreadsheets/d/{file['id']}/edit"),
+        })
+    return datasets
+
+
+def _move_to_dataset_folder(spreadsheet_id):
+    _, drive, folder_id = _google_services()
+    current = drive.files().get(fileId=spreadsheet_id, fields="parents").execute()
+    parents = current.get("parents", [])
+    kwargs = {"fileId": spreadsheet_id, "addParents": folder_id, "fields": "id,parents"}
+    if parents:
+        kwargs["removeParents"] = ",".join(parents)
+    drive.files().update(**kwargs).execute()
+
+
+def _create_spreadsheet(title, worksheet_titles):
+    sheets, _, _ = _google_services()
+    created = sheets.spreadsheets().create(
+        body={
+            "properties": {"title": title},
+            "sheets": [{"properties": {"title": name}} for name in worksheet_titles],
+        },
+        fields="spreadsheetId,spreadsheetUrl",
+    ).execute()
+    _move_to_dataset_folder(created["spreadsheetId"])
+    return created
+
+
+def _registry_spreadsheet_id(existing_files=None):
+    existing_files = existing_files if existing_files is not None else _list_drive_files()
+    registry = next((file for file in existing_files if file.get("name") == REGISTRY_TITLE), None)
+    if registry:
+        return registry["id"]
+    return _create_spreadsheet(REGISTRY_TITLE, ["Registry"])["spreadsheetId"]
+
+
+def _allocate_serial():
+    files = _list_drive_files()
+    registry_id = _registry_spreadsheet_id(files)
+    rows = _get_values(registry_id, "Registry")
+    current_serial = None
+    for row in rows[1:]:
+        if len(row) > 1 and row[0] == "next_serial":
+            try:
+                current_serial = int(row[1])
+            except (TypeError, ValueError):
+                current_serial = None
+            break
+    observed_next = max(
+        (parts[1] + 1 for file in files if (parts := _dataset_title_parts(file.get("name", "")))),
+        default=1,
+    )
+    if current_serial is None:
+        current_serial = observed_next
+    current_serial = max(current_serial, observed_next, 1)
+    _write_values(registry_id, "Registry", [["key", "value"], ["next_serial", current_serial + 1]])
+    return current_serial
+
+
+def create_dataset(name):
+    """Create a new spreadsheet dataset and initialize its three data tabs."""
+    name = str(name).strip() or "Field Survey"
+    serial = _allocate_serial()
+    dataset_id = f"{name}-{serial:03d}"
+    created = _create_spreadsheet(dataset_id, DATASET_SHEETS)
+    spreadsheet_id = created["spreadsheetId"]
+    info = {
+        "name": name,
+        "serial": serial,
+        "dataset_id": dataset_id,
+        "next_tree_id": 3,
+        **DEFAULT_MAP_ORIENTATION,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _write_values(spreadsheet_id, "Trees", [["tree", "x", "y"], [1, 0, 0], [2, 0, 1]])
+    _write_values(spreadsheet_id, "Measurements", [["tree_a", "tree_b", "distance_mm"]])
+    save_dataset_info(info, spreadsheet_id=spreadsheet_id)
+    info["spreadsheet_id"] = spreadsheet_id
+    st.session_state["active_spreadsheet_id"] = spreadsheet_id
     return info
 
 
-def load_dataset_info():
-    init_dataset_info()
-    return json.loads(DATASET_FILE.read_text(encoding="utf-8"))
+def _parse_dataset_info(rows):
+    if not rows:
+        raise ValueError("This spreadsheet has no Dataset tab metadata. Create datasets with this app.")
+    values = {str(row[0]): row[1] for row in rows[1:] if len(row) > 1 and row[0]}
+    if "dataset_id" not in values or "serial" not in values:
+        raise ValueError("This spreadsheet is missing required survey dataset metadata.")
+    info = dict(values)
+    for key in ("serial", "next_tree_id"):
+        if key in info:
+            info[key] = int(info[key])
+    for key in ("mirror_map_x", "mirror_map_y"):
+        info[key] = str(info.get(key, "false")).lower() in ("true", "1", "yes")
+    info["name"] = info.get("name", info["dataset_id"])
+    info["map_axis_layout"] = info.get("map_axis_layout", DEFAULT_MAP_ORIENTATION["map_axis_layout"])
+    return info
 
 
-def save_dataset_info(info):
+def load_dataset_info(spreadsheet_id=None):
+    spreadsheet_id = _active_spreadsheet_id(spreadsheet_id)
+    try:
+        return _parse_dataset_info(_get_values(spreadsheet_id, "Dataset"))
+    except Exception as exc:
+        if isinstance(exc, (StorageConfigurationError, ValueError)):
+            raise
+        raise RuntimeError(f"Could not read dataset metadata from Google Sheets: {exc}") from exc
+
+
+def save_dataset_info(info, spreadsheet_id=None):
+    spreadsheet_id = _active_spreadsheet_id(spreadsheet_id)
     info = dict(info)
     info["name"] = str(info.get("name", "Field Survey")).strip() or "Field Survey"
     info["serial"] = int(info["serial"])
-    info["dataset_id"] = _dataset_id(info["name"], info["serial"])
-    _write_json(DATASET_FILE, info)
+    info["dataset_id"] = f"{info['name']}-{info['serial']:03d}"
+    values = [["key", "value"]]
+    for key, value in info.items():
+        if isinstance(value, bool):
+            value = "true" if value else "false"
+        values.append([str(key), str(value)])
+    _write_values(spreadsheet_id, "Dataset", values)
+    return info
 
 
 def rename_dataset(name):
     info = load_dataset_info()
     info["name"] = str(name).strip() or info["name"]
-    info["not_downloaded"] = True
     save_dataset_info(info)
+    _, drive, _ = _google_services()
+    drive.files().update(fileId=_active_spreadsheet_id(), body={"name": info["dataset_id"]}, fields="id,name").execute()
     return info
 
 
-def mark_dataset_dirty():
-    info = load_dataset_info()
-    info["not_downloaded"] = True
-    save_dataset_info(info)
-
-
-def mark_dataset_downloaded():
-    info = load_dataset_info()
-    info["not_downloaded"] = False
-    info["last_downloaded_at"] = datetime.now(timezone.utc).isoformat()
-    save_dataset_info(info)
-
-
 def save_map_orientation(axis_layout, mirror_x, mirror_y):
-    """Persist map display orientation as part of the active dataset backup."""
     info = load_dataset_info()
     info["map_axis_layout"] = axis_layout if axis_layout in (
         "X horizontal, Y vertical", "Y horizontal, X vertical"
     ) else DEFAULT_MAP_ORIENTATION["map_axis_layout"]
     info["mirror_map_x"] = bool(mirror_x)
     info["mirror_map_y"] = bool(mirror_y)
-    info["not_downloaded"] = True
     save_dataset_info(info)
     return info
 
@@ -126,59 +275,33 @@ def set_tree2_reference_axis(axis):
     baseline = [d for a, b, d in measurements if {a, b} == {1, 2}]
     current_x, current_y = trees.get(2, (0, 1))
     distance = int(round(sum(baseline) / len(baseline))) if baseline else int(round(max(current_x, current_y)))
-    if distance <= 0:
-        distance = 1
-    new_position = (distance, 0) if axis == "X" else (0, distance)
-    if trees.get(2) != new_position:
-        trees[2] = new_position
-        save_trees(trees)
-        mark_dataset_dirty()
-    return new_position
+    distance = max(distance, 1)
+    trees[2] = (distance, 0) if axis == "X" else (0, distance)
+    save_trees(trees)
+    return trees[2]
 
 
 def mark_tree_id_used(tree_id):
     info = load_dataset_info()
     info["next_tree_id"] = max(int(info.get("next_tree_id", 3)), int(tree_id) + 1)
-    info["not_downloaded"] = True
     save_dataset_info(info)
-
-
-def replace_dataset(name, trees_dict, measurements, minimum_serial=None, next_tree_id=None, map_orientation=None):
-    """Replace the active survey and assign a fresh, monotonically increasing serial."""
-    trees_dict = dict(trees_dict)
-    if 1 not in trees_dict or 2 not in trees_dict:
-        raise ValueError("The uploaded dataset must include anchor trees 1 and 2.")
-    save_trees(trees_dict)
-    save_measurements(measurements)
-
-    registry = json.loads(SERIAL_FILE.read_text(encoding="utf-8")) if SERIAL_FILE.exists() else {"next_serial": 1}
-    serial = max(1, int(registry.get("next_serial", 1)), int(minimum_serial or 1))
-    _write_json(SERIAL_FILE, {"next_serial": serial + 1})
-    info = {
-        "name": str(name).strip() or "Imported Survey",
-        "serial": serial,
-        "next_tree_id": max(max(trees_dict) + 1, int(next_tree_id or 3)),
-        **{**DEFAULT_MAP_ORIENTATION, **(map_orientation or {})},
-        "not_downloaded": True,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "imported_at": datetime.now(timezone.utc).isoformat(),
-    }
-    save_dataset_info(info)
-    return load_dataset_info()
-
-
-def safe_filename(text):
-    name = re.sub(r"[^A-Za-z0-9_-]+", "_", str(text).strip()).strip("_")
-    return name or "field_survey"
 
 
 def load_trees():
-    init_files()
-    frame = pd.read_csv(TREES_FILE)
+    spreadsheet_id = _active_spreadsheet_id()
+    rows = _get_values(spreadsheet_id, "Trees")
+    if not rows:
+        return {}
+    columns = {str(name).strip().lower(): index for index, name in enumerate(rows[0])}
+    if not {"tree", "x", "y"}.issubset(columns):
+        raise ValueError("Trees tab must have tree, x, and y columns.")
     trees = {}
-    for row in frame.itertuples():
-        tree_id = int(row.tree)
-        x, y = max(0, int(round(float(row.x)))), max(0, int(round(float(row.y))))
+    for row in rows[1:]:
+        if len(row) <= max(columns.values()):
+            continue
+        tree_id = int(float(row[columns["tree"]]))
+        x = max(0, int(round(float(row[columns["x"]]))))
+        y = max(0, int(round(float(row[columns["y"]]))))
         if tree_id == 1:
             x, y = 0, 0
         trees[tree_id] = (x, y)
@@ -186,34 +309,35 @@ def load_trees():
 
 
 def save_trees(trees_dict):
-    pd.DataFrame(
-        [{"tree": int(t), "x": int(round(x)), "y": int(round(y))} for t, (x, y) in sorted(trees_dict.items())],
-        columns=["tree", "x", "y"],
-    ).to_csv(TREES_FILE, index=False)
+    rows = [["tree", "x", "y"]]
+    rows.extend([[int(tree), int(round(x)), int(round(y))] for tree, (x, y) in sorted(trees_dict.items())])
+    _write_values(_active_spreadsheet_id(), "Trees", rows)
 
 
 def load_measurements(trees_dict):
-    init_files()
-    frame = pd.read_csv(DATA_FILE)
-    required = {"tree_a", "tree_b", "distance_mm"}
-    # Accept the earlier `distance` column, whose values were metres.
-    if "distance_mm" not in frame and "distance" in frame:
-        frame["distance_mm"] = pd.to_numeric(frame["distance"], errors="coerce") * 1000
-    if not required.issubset(frame.columns):
+    rows = _get_values(_active_spreadsheet_id(), "Measurements")
+    if not rows:
         return []
-    result = []
-    for row in frame.itertuples():
-        a, b, distance = int(row.tree_a), int(row.tree_b), float(row.distance_mm)
+    columns = {str(name).strip().lower(): index for index, name in enumerate(rows[0])}
+    required = {"tree_a", "tree_b", "distance_mm"}
+    if not required.issubset(columns):
+        raise ValueError("Measurements tab must have tree_a, tree_b, and distance_mm columns.")
+    measurements = []
+    for row in rows[1:]:
+        if len(row) <= max(columns.values()):
+            continue
+        a = int(float(row[columns["tree_a"]]))
+        b = int(float(row[columns["tree_b"]]))
+        distance = float(row[columns["distance_mm"]])
         if a in trees_dict and b in trees_dict and a != b and distance > 0:
-            result.append((a, b, distance))
-    return result
+            measurements.append((a, b, distance))
+    return measurements
 
 
 def save_measurements(measurements):
-    pd.DataFrame(
-        [{"tree_a": int(a), "tree_b": int(b), "distance_mm": float(d)} for a, b, d in measurements],
-        columns=["tree_a", "tree_b", "distance_mm"],
-    ).to_csv(DATA_FILE, index=False)
+    rows = [["tree_a", "tree_b", "distance_mm"]]
+    rows.extend([[int(a), int(b), float(distance)] for a, b, distance in measurements])
+    _write_values(_active_spreadsheet_id(), "Measurements", rows)
 
 
 def append_measurement(a, b, distance_mm):

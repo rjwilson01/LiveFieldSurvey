@@ -1,10 +1,35 @@
 # Live Field Survey
 
-A Streamlit tool for recording tree-to-tree tape measurements and calculating adjusted tree positions with a least-squares network adjustment.
+A Streamlit tool for recording tree-to-tree tape measurements and calculating adjusted tree positions with a least-squares network adjustment. Survey data is stored directly in Google Sheets, with one spreadsheet per dataset.
+
+## Configure Google Sheets storage
+
+The app uses a Google Cloud service account. Enable the Google Sheets API and Google Drive API in the Cloud project, create a service account key, and create a Drive folder for survey spreadsheets. Share that folder with the service account email as an editor. The app creates each dataset spreadsheet in that folder and lists those spreadsheets in the sidebar.
+
+For local development, add the following to `.streamlit/secrets.toml`. For Streamlit Community Cloud, add the same TOML structure in the app's Secrets settings. Never commit the service account key or `secrets.toml` to Git.
+
+```toml
+[gcp_service_account]
+type = "service_account"
+project_id = "your-project-id"
+private_key_id = "your-private-key-id"
+private_key = """-----BEGIN PRIVATE KEY-----
+REPLACE_WITH_PRIVATE_KEY
+-----END PRIVATE KEY-----
+"""
+client_email = "your-service-account@your-project.iam.gserviceaccount.com"
+client_id = "your-client-id"
+token_uri = "https://oauth2.googleapis.com/token"
+
+[google_sheets]
+folder_id = "your-shared-drive-folder-id"
+```
+
+`folder_id` is the ID in the Google Drive folder URL. A hidden `_LiveFieldSurvey Registry` spreadsheet in that folder tracks the next dataset serial so IDs are not reused if a dataset spreadsheet is later removed.
 
 ## Run locally
 
-Install the packages from `requirements.txt`, then run:
+Install the packages from `requirements.txt`, configure the secrets above, then run:
 
 ```bash
 streamlit run app.py
@@ -12,17 +37,13 @@ streamlit run app.py
 
 ## Field workflow
 
-1. Tree 1 is shown at the origin `(0, 0)`. Tree 2 anchors either the positive X or positive Y axis, selected on the Help page, where a small diagram previews its direction. Its 1 ↔ 2 distance is a regular measurement and sets Tree 2's coordinate on that axis.
-2. Add trees from Tree management in the sidebar. Select an existing tree or the next available ID, tap a grid point to set its starting estimate, then press Add or Update. Tree 1 and Tree 2 are protected anchors. Use the map toggle to show or hide initial estimates.
-3. Record measured distances in millimetres. The live map draws each measured link and recalculates the network.
-4. Review amber trees for missing links or a disconnected network. Three or more links and a path to the anchor network are used as a practical field indicator that a tree has enough ties.
-5. Review distance residual warnings and large shifts from saved estimates. Both alert thresholds can be changed in the sidebar. Measurement distances can be edited or deleted.
-6. Download the complete dataset ZIP from the Dataset section in the sidebar for backup and restore. Download the combined tree and measurement CSV, or a separate measurement ledger, from Export survey.
+1. Select a dataset spreadsheet from the sidebar. Create a new dataset from **Data management**; this creates a workbook with `Trees`, `Measurements`, and `Dataset` tabs.
+2. Tree 1 is fixed at the origin. Tree 2 anchors either the positive X or positive Y axis; set this on the Help page. Its 1 ↔ 2 distance is a regular measurement and sets its coordinate on that axis.
+3. Add trees from Tree management in the sidebar. Choose an existing tree or the next available ID, tap a placement target to set a starting estimate, then press Add or Update.
+4. Record measured distances in millimetres. The live map draws each measured link and recalculates the network. Edits are written immediately to the selected spreadsheet.
+5. Review amber trees for missing links or a disconnected network. Three or more links and a path to the anchor network are used as a practical field indicator that a tree has enough ties.
+6. Review distance residual warnings and large shifts from saved estimates. Both alert thresholds can be changed on the Help page.
 
-## Dataset backup and replacement
+One measurement is allowed per direction: `2 → 4` and `4 → 2` can both exist, but a second `2 → 4` updates the existing row. The review table groups records by unordered pair while preserving direction. Its short headings are `Meas`, `Adj`, and `Δ`; residuals are rounded to whole millimetres. Click a table row or map line to select a record. Measurement edits, tree estimates, and map orientation are saved directly to Google Sheets.
 
-The Dataset panel assigns an ID in the form `Name-001`. Each confirmed ZIP upload receives the next serial number and replaces the active trees and measurements. The ZIP includes a manifest plus `trees.csv` and `measurements.csv`; those two CSVs retain starting estimates and all directed measurement records. The app validates the archive before showing a replacement confirmation. The Dataset panel marks the active set **Not downloaded** whenever its data or name changes and clears that flag when the ZIP download is requested. Download the ZIP before replacing a set that matters to you.
-
-One measurement is allowed per direction: `2 → 4` and `4 → 2` can both exist, but a second `2 → 4` must update the existing row. The review table groups records by unordered pair while preserving From/To direction. Its short headings are `Meas`, `Adj`, and `Δ`; residuals are rounded to whole millimetres. Click a table row to load it into the sidebar for update or deletion. On the map, successive tree taps alternate the From and To fields; tapping a currently selected endpoint keeps it and directs the next tap to the other field. Tree 2 can anchor either the positive X or positive Y axis. Saving a nonzero initial distance for Tree 2 automatically creates the 1 → 2 baseline measurement if none exists; editing that measurement updates Tree 2's coordinate on the selected axis.
-
-Trees 1 and 2 are protected anchors. Other trees and their associated measurements can be deleted from the sidebar. Deleted tree numbers are retired; the next tree number is saved in the dataset ZIP so it is not reused when that dataset is restored. Each successful edit is written immediately to `active_trees.csv`, `survey_data.csv`, and the dataset metadata files in the app's working directory, so there is no separate Save button. On Streamlit Community Cloud these local files are not a durable backup; download the ZIP before a reboot or any operation that might reset app storage. For unattended durable saving, the app needs a persistent external database.
+Each dataset workbook has a `Trees` tab for initial coordinates, a `Measurements` tab for directed distance readings, and a `Dataset` tab for its name, unique serial, next tree ID, and display settings. The app does not need an export/import CSV or a separate Save action. Google Sheets is the durable store; use Drive's own version history or file-copy features if you need a manual backup.

@@ -19,8 +19,60 @@ section.main [data-testid="stVerticalBlock"] { gap: 0.7rem; }
 </style>
 """, unsafe_allow_html=True)
 
-storage.init_files()
-active_dataset = storage.load_dataset_info()
+def select_active_dataset():
+    st.session_state["active_spreadsheet_id"] = st.session_state["dataset_selector"]
+
+
+try:
+    datasets = storage.list_datasets()
+except Exception as exc:
+    st.error("Google Sheets storage could not be reached.")
+    st.info("Configure the service account and shared Drive folder described in README.md, then reload the app.")
+    st.exception(exc)
+    st.stop()
+
+dataset_by_id = {dataset["spreadsheet_id"]: dataset for dataset in datasets}
+pending_dataset = st.session_state.pop("_dataset_to_activate", None)
+if pending_dataset in dataset_by_id:
+    st.session_state["active_spreadsheet_id"] = pending_dataset
+
+if not datasets:
+    with st.sidebar:
+        st.title("🌳 Live Field Survey")
+        st.info("No survey spreadsheets found in the configured Drive folder.")
+        first_dataset_name = st.text_input("First dataset name", value="Field Survey", key="first_dataset_name")
+        if st.button("Create first dataset", type="primary", width="stretch"):
+            created = storage.create_dataset(first_dataset_name)
+            st.session_state["active_spreadsheet_id"] = created["spreadsheet_id"]
+            st.rerun()
+    st.title("Connect a survey spreadsheet")
+    st.caption("Create the first survey dataset in Google Sheets to begin recording trees and measurements.")
+    st.stop()
+
+dataset_ids = list(dataset_by_id)
+active_id = st.session_state.get("active_spreadsheet_id")
+if active_id not in dataset_by_id:
+    active_id = dataset_ids[0]
+    st.session_state["active_spreadsheet_id"] = active_id
+if st.session_state.get("dataset_selector") not in dataset_by_id or pending_dataset in dataset_by_id:
+    st.session_state["dataset_selector"] = active_id
+
+with st.sidebar:
+    st.title("🌳 Live Field Survey")
+    st.selectbox(
+        "Dataset spreadsheet",
+        options=dataset_ids,
+        format_func=lambda spreadsheet_id: dataset_by_id[spreadsheet_id]["dataset_id"],
+        key="dataset_selector",
+        on_change=select_active_dataset,
+    )
+    st.caption("Changes save directly to Google Sheets.")
+    st.divider()
+
+active_id = st.session_state["active_spreadsheet_id"]
+active_dataset = storage.load_dataset_info(active_id)
+with st.sidebar:
+    st.caption(f"Active: {active_dataset['dataset_id']}")
 # These values are also used by widgets on the Help page. Reload them on each
 # app run because Streamlit may discard widget state when navigating away from
 # the page containing those widgets.
@@ -31,14 +83,6 @@ st.session_state.setdefault("show_initial_estimates_setting", False)
 st.session_state.setdefault("show_starting_targets_setting", True)
 st.session_state["show_initial_estimates"] = st.session_state["show_initial_estimates_setting"]
 st.session_state["show_starting_targets"] = st.session_state["show_starting_targets_setting"]
-with st.sidebar:
-    st.title("🌳 Live Field Survey")
-    if active_dataset.get("not_downloaded", True):
-        st.warning(f"Dataset: {active_dataset['dataset_id']} · backup needed")
-    else:
-        st.caption(active_dataset["dataset_id"])
-    st.divider()
-
 # Ensure data arrays survive page-swaps in global context memory
 if "survey_ledger" not in st.session_state:
     st.session_state["survey_ledger"] = []
