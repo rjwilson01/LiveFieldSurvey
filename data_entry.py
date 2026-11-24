@@ -221,12 +221,19 @@ with st.sidebar:
         to_key = f"measurement_to_{measurement_revision}"
         distance_key = f"measurement_distance_{measurement_revision}"
         st.session_state.setdefault(from_key, int(from_default))
+        if st.session_state[from_key] not in tree_ids:
+            st.session_state[from_key] = int(from_default)
         st.session_state.setdefault(to_key, int(to_default))
+        if st.session_state[to_key] not in tree_ids or st.session_state[to_key] == st.session_state[from_key]:
+            st.session_state[to_key] = int(next((tree for tree in tree_ids if tree != st.session_state[from_key]), st.session_state[from_key]))
         st.session_state.setdefault(distance_key, max(1, int(measurement_values.get("distance", 1000))))
 
         def refresh_suggested_distance():
             picked_from = int(st.session_state[from_key])
             picked_to = int(st.session_state[to_key])
+            if picked_to == picked_from:
+                picked_to = int(next((tree for tree in tree_ids if tree != picked_from), picked_from))
+                st.session_state[to_key] = picked_to
             existing_index = next((index for index, (a, b, _) in enumerate(measurements) if a == picked_from and b == picked_to), None)
             if existing_index is not None:
                 picked_distance = max(1, int(round(measurements[existing_index][2])))
@@ -242,11 +249,13 @@ with st.sidebar:
         left, right = st.columns(2)
         with left:
             with st.container(border=True, key="from-picker"):
-                from_tree = st.selectbox("From tree", tree_ids, index=tree_ids.index(from_default), key=from_key, on_change=refresh_suggested_distance)
+                from_tree = st.selectbox("From tree", tree_ids, key=from_key, on_change=refresh_suggested_distance)
         with right:
             current_to_default = to_default if to_default != from_tree else next((tree for tree in tree_ids if tree != from_tree), from_tree)
+            if st.session_state[to_key] not in tree_ids or st.session_state[to_key] == from_tree:
+                st.session_state[to_key] = int(current_to_default)
             with st.container(border=True, key="to-picker"):
-                to_tree = st.selectbox("To tree", tree_ids, index=tree_ids.index(current_to_default), key=to_key, on_change=refresh_suggested_distance)
+                to_tree = st.selectbox("To tree", tree_ids, key=to_key, on_change=refresh_suggested_distance)
         distance = st.number_input("Distance (mm)", min_value=1, step=1, key=distance_key)
         st.session_state["measurement_editor_values"] = {"from": int(from_tree), "to": int(to_tree), "distance": int(distance)}
         if selected_measurement_index is not None:
