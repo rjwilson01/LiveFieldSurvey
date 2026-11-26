@@ -24,9 +24,9 @@ def main():
     created_ids = []
     try:
         first = storage.create_dataset("Codex Verification")
-        first_id = first["spreadsheet_id"]
+        first_id = first["dataset_pk"]
         created_ids.append(first_id)
-        st.session_state["active_spreadsheet_id"] = first_id
+        st.session_state["active_dataset_pk"] = first_id
 
         assert storage.load_trees() == {1: (0, 0), 2: (0, 1)}
         storage.save_trees({1: (0, 0), 2: (0, 1), 3: (300, 400)})
@@ -56,10 +56,10 @@ def main():
 
         renamed = storage.rename_dataset("Codex Verification Renamed")
         assert renamed["dataset_id"].startswith("Codex Verification Renamed-")
-        assert any(item["spreadsheet_id"] == first_id for item in storage.list_datasets())
+        assert any(item["dataset_pk"] == first_id for item in storage.list_datasets())
 
         second = storage.create_dataset("Codex Verification Second")
-        second_id = second["spreadsheet_id"]
+        second_id = second["dataset_pk"]
         created_ids.append(second_id)
         assert second["serial"] == first["serial"] + 1
         print("Neon smoke check passed: dataset CRUD, serials, estimates, directed measurements, orientation, and cascade delete.")

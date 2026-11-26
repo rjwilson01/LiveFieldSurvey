@@ -1,9 +1,7 @@
 """PostgreSQL persistence for survey datasets, backed by Neon."""
 
-from datetime import datetime, timezone
 from pathlib import Path
 import os
-import re
 
 import streamlit as st
 import psycopg
@@ -88,7 +86,7 @@ def init_files():
 
 
 def _active_dataset_id(dataset_id=None):
-    selected = dataset_id or st.session_state.get("active_spreadsheet_id")
+    selected = dataset_id or st.session_state.get("active_dataset_pk")
     if not selected:
         raise StorageConfigurationError("Select or create a dataset before editing survey data.")
     try:
@@ -148,9 +146,9 @@ def create_dataset(name):
         "next_tree_id": 3,
         **DEFAULT_MAP_ORIENTATION,
         "created_at": created_at.isoformat(),
-        "spreadsheet_id": dataset_pk,
+        "dataset_pk": dataset_pk,
     }
-    st.session_state["active_spreadsheet_id"] = dataset_pk
+    st.session_state["active_dataset_pk"] = dataset_pk
     return info
 
 
@@ -158,19 +156,15 @@ def list_datasets():
     """List datasets in the Neon database, preserving the app's selector shape."""
     with _connection_pool().connection() as conn:
         rows = conn.execute(
-            "SELECT id, dataset_id, name, serial, source_spreadsheet_id "
+            "SELECT id, dataset_id, name, serial "
             "FROM survey_datasets ORDER BY serial, id"
         ).fetchall()
     return [
         {
-            "spreadsheet_id": row[0],
+            "dataset_pk": row[0],
             "dataset_id": row[1],
             "name": row[2],
             "serial": row[3],
-            "source_spreadsheet_id": row[4],
-            "url": (
-                f"https://docs.google.com/spreadsheets/d/{row[4]}/edit" if row[4] else None
-            ),
         }
         for row in rows
     ]
@@ -180,7 +174,7 @@ def _dataset_info_from_row(row):
     if not row:
         raise ValueError("The selected dataset was not found in Neon.")
     return {
-        "spreadsheet_id": row[0],
+        "dataset_pk": row[0],
         "name": row[1],
         "serial": int(row[2]),
         "dataset_id": row[3],
@@ -189,24 +183,23 @@ def _dataset_info_from_row(row):
         "mirror_map_x": bool(row[6]),
         "mirror_map_y": bool(row[7]),
         "created_at": row[8].isoformat() if row[8] else None,
-        "source_spreadsheet_id": row[9],
     }
 
 
-def load_dataset_info(spreadsheet_id=None):
-    selected = _active_dataset_id(spreadsheet_id)
+def load_dataset_info(dataset_pk=None):
+    selected = _active_dataset_id(dataset_pk)
     with _connection_pool().connection() as conn:
         row = conn.execute(
             "SELECT id, name, serial, dataset_id, next_tree_id, map_axis_layout, "
-            "mirror_map_x, mirror_map_y, created_at, source_spreadsheet_id "
+            "mirror_map_x, mirror_map_y, created_at "
             "FROM survey_datasets WHERE id = %s",
             (selected,),
         ).fetchone()
     return _dataset_info_from_row(row)
 
 
-def save_dataset_info(info, spreadsheet_id=None):
-    selected = _active_dataset_id(spreadsheet_id or info.get("spreadsheet_id"))
+def save_dataset_info(info, dataset_pk=None):
+    selected = _active_dataset_id(dataset_pk or info.get("dataset_pk"))
     name = str(info.get("name", "Field Survey")).strip() or "Field Survey"
     serial = int(info["serial"])
     dataset_id = f"{name}-{serial:03d}"
@@ -356,78 +349,3 @@ def append_measurement(a, b, distance_mm):
     measurements = load_measurements(load_trees())
     measurements.append((int(a), int(b), float(distance_mm)))
     save_measurements(measurements)
-
-
-def google_sheets_migration_available():
-    try:
-        return bool(st.secrets["google_sheets"]["folder_id"] and st.user.tokens.get("access"))
-    except (AttributeError, KeyError, TypeError, FileNotFoundError):
-        return False
-
-
-def import_google_sheets_datasets():
-    """Copy datasets from the configured Sheets folder; source workbooks are unchanged."""
-    import google_sheets_storage as legacy
-
-    sources = legacy.list_datasets()
-    legacy_next_serial = legacy.next_dataset_serial()
-    imported, skipped, failures = [], [], []
-    for source in sources:
-        source_id = str(source["spreadsheet_id"])
-        try:
-            with _connection_pool().connection() as conn:
-                existing = conn.execute(
-                    "SELECT id FROM survey_datasets WHERE source_spreadsheet_id = %s",
-                    (source_id,),
-                ).fetchone()
-                if existing:
-                    skipped.append(source["dataset_id"])
-                    continue
-
-                info = legacy.load_dataset_info(source_id)
-                trees = legacy.load_trees(source_id)
-                measurements = legacy.load_measurements(trees, source_id)
-                name = str(info.get("name", source["name"])).strip() or "Field Survey"
-                serial = _next_serial(conn, preferred=info.get("serial"))
-                dataset_id = f"{name}-{serial:03d}"
-                created_at = info.get("created_at")
-                try:
-                    created_at = datetime.fromisoformat(created_at) if created_at else datetime.now(timezone.utc)
-                except (TypeError, ValueError):
-                    created_at = datetime.now(timezone.utc)
-                row = conn.execute(
-                    "INSERT INTO survey_datasets (name, serial, dataset_id, next_tree_id, "
-                    "map_axis_layout, mirror_map_x, mirror_map_y, created_at, source_spreadsheet_id) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                    (
-                        name,
-                        serial,
-                        dataset_id,
-                        max(3, int(info.get("next_tree_id", 3))),
-                        info.get("map_axis_layout", DEFAULT_MAP_ORIENTATION["map_axis_layout"]),
-                        bool(info.get("mirror_map_x", False)),
-                        bool(info.get("mirror_map_y", False)),
-                        created_at,
-                        source_id,
-                    ),
-                ).fetchone()
-                dataset_pk = row[0]
-                _executemany(conn,
-                    "INSERT INTO survey_trees (dataset_id, tree_id, x, y) VALUES (%s, %s, %s, %s)",
-                    [(dataset_pk, tree, x, y) for tree, (x, y) in trees.items()],
-                )
-                _executemany(conn,
-                    "INSERT INTO survey_measurements (dataset_id, tree_a, tree_b, distance_mm) "
-                    "VALUES (%s, %s, %s, %s)",
-                    [(dataset_pk, a, b, distance) for a, b, distance in measurements],
-                )
-                imported.append(dataset_id)
-        except Exception as exc:
-            failures.append(f"{source['dataset_id']}: {exc}")
-    with _connection_pool().connection() as conn:
-        conn.execute(
-            "UPDATE dataset_serial_counters SET next_serial = GREATEST(next_serial, %s) "
-            "WHERE singleton = TRUE",
-            (int(legacy_next_serial),),
-        )
-    return {"imported": imported, "skipped": skipped, "failures": failures}

@@ -171,5 +171,4 @@ with st.expander("Datasets and storage"):
     - Choose a survey dataset from the sidebar to switch datasets.
     - Open **Data management** to create a dataset or rename the active one.
     - Tree positions, measurements, dataset identity, and map settings are saved directly to Neon PostgreSQL as you work.
-    - Existing Google Sheets datasets can be copied into Neon from **Data management**. The source workbooks are left unchanged and can be opened there as a reference.
     """)

@@ -36,45 +36,32 @@ if not is_logged_in:
     st.stop()
 
 try:
-    allowed_email = str(st.secrets["google_sheets"]["allowed_email"]).strip().lower()
+    allowed_email = str(st.secrets["app"]["allowed_email"]).strip().lower()
 except (KeyError, FileNotFoundError):
-    st.error("Set google_sheets.allowed_email in Streamlit Secrets to the Google account that owns the survey folder.")
+    st.error("Set app.allowed_email in Streamlit Secrets to the Google account allowed to use this survey.")
     st.stop()
 
 if str(st.user.get("email", "")).strip().lower() != allowed_email:
-    st.error("This app is restricted to the Google account configured for the survey folder.")
+    st.error("This app is restricted to the Google account configured in app.allowed_email.")
     st.button("Sign out", on_click=st.logout)
     st.stop()
 
 def select_active_dataset():
-    st.session_state["active_spreadsheet_id"] = st.session_state["dataset_selector"]
+    st.session_state["active_dataset_pk"] = st.session_state["dataset_selector"]
 
 
 try:
     datasets = storage.list_datasets()
 except Exception as exc:
-    status = getattr(getattr(exc, "resp", None), "status", None)
-    if status == 401:
-        st.error("Your Google sign-in has expired. Sign out and sign in again to reconnect.")
-        st.button("Sign out and reconnect", on_click=st.logout)
-    else:
-        st.error("Neon PostgreSQL storage could not be reached.")
-        st.info("Check DATABASE_URL in Streamlit Secrets and the Neon project status.")
+    st.error("Neon PostgreSQL storage could not be reached.")
+    st.info("Check DATABASE_URL in Streamlit Secrets and the Neon project status.")
     st.exception(exc)
     st.stop()
 
-import_result = st.session_state.pop("_google_import_result", None)
-if import_result:
-    st.success(f"Copied {len(import_result['imported'])} dataset(s) into Neon.")
-    if import_result["skipped"]:
-        st.info(f"Already copied: {', '.join(import_result['skipped'])}")
-    if import_result["failures"]:
-        st.warning("Some datasets could not be copied: " + "; ".join(import_result["failures"]))
-
-dataset_by_id = {dataset["spreadsheet_id"]: dataset for dataset in datasets}
+dataset_by_id = {dataset["dataset_pk"]: dataset for dataset in datasets}
 pending_dataset = st.session_state.pop("_dataset_to_activate", None)
 if pending_dataset in dataset_by_id:
-    st.session_state["active_spreadsheet_id"] = pending_dataset
+    st.session_state["active_dataset_pk"] = pending_dataset
 
 if not datasets:
     with st.sidebar:
@@ -83,29 +70,17 @@ if not datasets:
         first_dataset_name = st.text_input("First dataset name", value="Field Survey", key="first_dataset_name")
         if st.button("Create first dataset", type="primary", width="stretch"):
             created = storage.create_dataset(first_dataset_name)
-            st.session_state["active_spreadsheet_id"] = created["spreadsheet_id"]
+            st.session_state["active_dataset_pk"] = created["dataset_pk"]
             st.rerun()
-        if storage.google_sheets_migration_available():
-            if st.button("Copy existing datasets from Google Sheets", width="stretch"):
-                try:
-                    result = storage.import_google_sheets_datasets()
-                    st.session_state["_google_import_result"] = result
-                    migrated = storage.list_datasets()
-                    if migrated:
-                        st.session_state["active_spreadsheet_id"] = migrated[0]["spreadsheet_id"]
-                    st.rerun()
-                except Exception as exc:
-                    st.error("Could not copy the Google Sheets datasets into Neon.")
-                    st.exception(exc)
     st.title("Connect a survey dataset")
-    st.caption("Create a dataset in Neon or copy your existing Google Sheets datasets to begin recording trees and measurements.")
+    st.caption("Create a dataset in Neon to begin recording trees and measurements.")
     st.stop()
 
 dataset_ids = list(dataset_by_id)
-active_id = st.session_state.get("active_spreadsheet_id")
+active_id = st.session_state.get("active_dataset_pk")
 if active_id not in dataset_by_id:
     active_id = dataset_ids[0]
-    st.session_state["active_spreadsheet_id"] = active_id
+    st.session_state["active_dataset_pk"] = active_id
 if st.session_state.get("dataset_selector") not in dataset_by_id or pending_dataset in dataset_by_id:
     st.session_state["dataset_selector"] = active_id
 
@@ -115,14 +90,14 @@ with st.sidebar:
     st.selectbox(
         "Survey dataset",
         options=dataset_ids,
-        format_func=lambda spreadsheet_id: dataset_by_id[spreadsheet_id]["dataset_id"],
+        format_func=lambda dataset_pk: dataset_by_id[dataset_pk]["dataset_id"],
         key="dataset_selector",
         on_change=select_active_dataset,
     )
     st.caption("Changes save directly to Neon PostgreSQL.")
     st.divider()
 
-active_id = st.session_state["active_spreadsheet_id"]
+active_id = st.session_state["active_dataset_pk"]
 active_dataset = storage.load_dataset_info(active_id)
 with st.sidebar:
     st.caption(f"Active: {active_dataset['dataset_id']}")

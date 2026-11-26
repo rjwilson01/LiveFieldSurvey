@@ -1,6 +1,6 @@
 # Live Field Survey
 
-A Streamlit tool for recording tree-to-tree tape measurements and calculating adjusted tree positions with a least-squares network adjustment. Survey datasets are stored in Neon PostgreSQL. Existing Google Sheets workbooks can be copied into Neon without changing the originals.
+A Streamlit tool for recording tree-to-tree tape measurements and calculating adjusted tree positions with a least-squares network adjustment. Survey datasets are stored in Neon PostgreSQL.
 
 ## Neon setup
 
@@ -15,11 +15,18 @@ DATABASE_URL_UNPOOLED = "YOUR_NEON_DIRECT_CONNECTION_STRING"
 
 Use the pooled URL for normal app connections. Schema migrations prefer the direct URL. The app applies the checked-in SQL migration from `migrations/` once per database schema version.
 
-## Sign-in and Google Sheets migration
+## Sign-in
 
-Keep the existing `[auth]` OAuth settings and `[google_sheets]` settings in Streamlit Secrets for the initial migration. Google sign-in still restricts access to the account in `google_sheets.allowed_email`. Drive and Sheets API access is retained only to copy existing workbooks into Neon. The migration button appears when the configured folder and Google API token are available. It copies each workbook's dataset metadata, starting estimates, directed measurements, and next dataset serial. It does not delete or modify source workbooks. Repeating the import skips workbooks already copied.
+The app uses Google OAuth for sign-in and restricts access to the email in `app.allowed_email`. No Google Drive or Sheets API settings are used.
 
-After the data has been copied and verified, the Google Drive and Sheets API scopes and folder settings can be removed. Google sign-in can remain for app access control.
+In Streamlit Secrets, keep your existing `[auth]` OAuth block and set the allowed account separately:
+
+```toml
+[app]
+allowed_email = "your-sign-in-account@example.com"
+```
+
+The old `[google_sheets]` block can be removed. `DATABASE_URL_UNPOOLED` is recommended for schema setup; if omitted, setup falls back to `DATABASE_URL`.
 
 For Streamlit Community Cloud, keep the OAuth settings in the app's **Secrets**. The OAuth client redirect URI must be the app URL followed by `/oauth2callback`. Never commit OAuth secrets or database URLs to Git.
 
@@ -33,7 +40,7 @@ streamlit run app.py
 
 ## Field workflow
 
-1. Sign in with the configured Google account and select a dataset from the sidebar. Copy existing Google Sheets datasets from **Data management**, or create a new dataset there.
+1. Sign in with the configured Google account and select a dataset from the sidebar. Create a new dataset from **Data management** when needed.
 2. Tree 1 is fixed at the origin. Tree 2 anchors either the positive X or positive Y axis; set this on the Help page. Its 1 ↔ 2 distance sets its coordinate on that axis.
 3. Add trees from Tree management in the sidebar. Choose an existing tree or the next available ID, tap a placement target to set a starting estimate, then press Add or Update.
 4. Record measured distances in millimetres. The live map draws each measured link and recalculates the network. Edits are written to Neon as you work.

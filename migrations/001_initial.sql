@@ -16,8 +16,7 @@ CREATE TABLE IF NOT EXISTS survey_datasets (
     map_axis_layout TEXT NOT NULL DEFAULT 'X horizontal, Y vertical',
     mirror_map_x BOOLEAN NOT NULL DEFAULT FALSE,
     mirror_map_y BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    source_spreadsheet_id TEXT UNIQUE
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS survey_trees (
