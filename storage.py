@@ -72,9 +72,12 @@ def _connection_pool():
     _run_migrations()
     return ConnectionPool(
         conninfo=_database_url(),
-        min_size=1,
+        min_size=0,
         max_size=5,
         timeout=15,
+        max_idle=60,
+        max_lifetime=900,
+        check=ConnectionPool.check_connection,
         open=True,
         kwargs={"connect_timeout": 15},
     )
@@ -99,6 +102,20 @@ def _executemany(conn, query, params):
     """Execute a batch using psycopg's cursor API."""
     with conn.cursor() as cursor:
         cursor.executemany(query, params)
+
+
+def _read_rows(query, params=(), *, one=False):
+    """Run an idempotent read, replacing a connection lost while the app slept."""
+    pool = _connection_pool()
+    for attempt in range(2):
+        try:
+            with pool.connection() as conn:
+                cursor = conn.execute(query, params)
+                return cursor.fetchone() if one else cursor.fetchall()
+        except psycopg.OperationalError:
+            if attempt:
+                raise
+    raise RuntimeError("Database read retry exhausted unexpectedly.")
 
 
 def _next_serial(conn, preferred=None):
@@ -154,11 +171,10 @@ def create_dataset(name):
 
 def list_datasets():
     """List datasets in the Neon database, preserving the app's selector shape."""
-    with _connection_pool().connection() as conn:
-        rows = conn.execute(
-            "SELECT id, dataset_id, name, serial "
-            "FROM survey_datasets ORDER BY serial, id"
-        ).fetchall()
+    rows = _read_rows(
+        "SELECT id, dataset_id, name, serial "
+        "FROM survey_datasets ORDER BY serial, id"
+    )
     return [
         {
             "dataset_pk": row[0],
@@ -188,13 +204,13 @@ def _dataset_info_from_row(row):
 
 def load_dataset_info(dataset_pk=None):
     selected = _active_dataset_id(dataset_pk)
-    with _connection_pool().connection() as conn:
-        row = conn.execute(
-            "SELECT id, name, serial, dataset_id, next_tree_id, map_axis_layout, "
-            "mirror_map_x, mirror_map_y, created_at "
-            "FROM survey_datasets WHERE id = %s",
-            (selected,),
-        ).fetchone()
+    row = _read_rows(
+        "SELECT id, name, serial, dataset_id, next_tree_id, map_axis_layout, "
+        "mirror_map_x, mirror_map_y, created_at "
+        "FROM survey_datasets WHERE id = %s",
+        (selected,),
+        one=True,
+    )
     return _dataset_info_from_row(row)
 
 
@@ -279,11 +295,10 @@ def mark_tree_id_used(tree_id):
 
 def load_trees():
     dataset_id = _active_dataset_id()
-    with _connection_pool().connection() as conn:
-        rows = conn.execute(
-            "SELECT tree_id, x, y FROM survey_trees WHERE dataset_id = %s ORDER BY tree_id",
-            (dataset_id,),
-        ).fetchall()
+    rows = _read_rows(
+        "SELECT tree_id, x, y FROM survey_trees WHERE dataset_id = %s ORDER BY tree_id",
+        (dataset_id,),
+    )
     return {int(tree): (int(x), int(y)) for tree, x, y in rows}
 
 
@@ -316,12 +331,11 @@ def save_trees(trees_dict):
 def load_measurements(trees_dict):
     dataset_id = _active_dataset_id()
     tree_ids = set(trees_dict)
-    with _connection_pool().connection() as conn:
-        rows = conn.execute(
-            "SELECT tree_a, tree_b, distance_mm FROM survey_measurements "
-            "WHERE dataset_id = %s ORDER BY record_id",
-            (dataset_id,),
-        ).fetchall()
+    rows = _read_rows(
+        "SELECT tree_a, tree_b, distance_mm FROM survey_measurements "
+        "WHERE dataset_id = %s ORDER BY record_id",
+        (dataset_id,),
+    )
     return [
         (int(a), int(b), float(distance))
         for a, b, distance in rows
