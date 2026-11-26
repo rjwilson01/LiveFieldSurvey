@@ -135,9 +135,16 @@ with st.sidebar:
                 estimate_y = st.number_input("Initial Y", min_value=0, value=int(current_y), step=100, disabled=tree_id == 1 or (tree_id == 2 and tree2_has_baseline), key=f"tree_y_{tree_form_revision}_{tree_id}")
             add_col, delete_col = st.columns(2)
             with add_col:
-                save_tree = st.form_submit_button("Update tree" if tree_exists else "Add tree", disabled=tree_id == 1, width="stretch")
+                save_tree = st.form_submit_button(
+                    "Update tree" if tree_exists else "Add tree",
+                    disabled=tree_id == 1 or (tree_id == 2 and tree2_has_baseline),
+                    width="stretch",
+                )
             with delete_col:
                 delete_tree = st.form_submit_button("Delete tree", disabled=not tree_exists or tree_id in (1, 2), width="stretch")
+
+        if tree_id == 2 and tree2_has_baseline:
+            st.caption("Tree 2 is anchored by the 1 ↔ 2 measurement. Edit that distance in the Measurement section.")
 
         if save_tree:
             if tree_exists:
@@ -198,9 +205,43 @@ with st.sidebar:
 
 
     with st.expander("Measurement", expanded=True):
+        # Refresh the editor once after this version change. Earlier app state
+        # could leave a 1000 mm draft beside an existing 1 → 2 record (for
+        # example, 800 mm), making the correct Update action look disconnected.
+        if (
+            st.session_state.get("measurement_editor_state_version") != 2
+            or st.session_state.get("measurement_editor_dataset_pk")
+            != st.session_state.get("active_dataset_pk")
+        ):
+            previous_values = st.session_state.get("measurement_editor_values", {})
+            first = previous_values.get("from", tree_ids[0] if tree_ids else 1)
+            second = previous_values.get("to", tree_ids[1] if len(tree_ids) > 1 else first)
+            if first not in tree_ids:
+                first = tree_ids[0] if tree_ids else 1
+            if second not in tree_ids or second == first:
+                second = next((tree for tree in tree_ids if tree != first), first)
+            existing_index = next(
+                (i for i, (a, b, _) in enumerate(measurements) if a == first and b == second),
+                None,
+            )
+            if existing_index is not None:
+                distance = int(round(measurements[existing_index][2]))
+                st.session_state["selected_measurement_index"] = existing_index
+                st.session_state["highlight_pair"] = tuple(sorted((first, second)))
+            else:
+                distance = suggested_measurement_distance(first, second)
+                st.session_state["selected_measurement_index"] = None
+            st.session_state["measurement_editor_values"] = {"from": first, "to": second, "distance": distance}
+            st.session_state["measurement_form_revision"] = st.session_state.get("measurement_form_revision", 0) + 1
+            st.session_state["measurement_editor_state_version"] = 2
+            st.session_state["measurement_editor_dataset_pk"] = st.session_state.get("active_dataset_pk")
         if "measurement_editor_values" not in st.session_state:
             first, second = (tree_ids[0], tree_ids[1]) if len(tree_ids) > 1 else (1, 2)
-            st.session_state["measurement_editor_values"] = {"from": first, "to": second, "distance": 1000}
+            st.session_state["measurement_editor_values"] = {
+                "from": first,
+                "to": second,
+                "distance": suggested_measurement_distance(first, second),
+            }
         if "measurement_next_field" not in st.session_state:
             st.session_state["measurement_next_field"] = "from"
         measurement_revision = st.session_state.get("measurement_form_revision", 0)
@@ -226,7 +267,10 @@ with st.sidebar:
         st.session_state.setdefault(to_key, int(to_default))
         if st.session_state[to_key] not in tree_ids or st.session_state[to_key] == st.session_state[from_key]:
             st.session_state[to_key] = int(next((tree for tree in tree_ids if tree != st.session_state[from_key]), st.session_state[from_key]))
-        st.session_state.setdefault(distance_key, max(1, int(measurement_values.get("distance", 1000))))
+        if selected_measurement_index is not None:
+            st.session_state[distance_key] = max(1, int(measurement_values["distance"]))
+        else:
+            st.session_state.setdefault(distance_key, max(1, int(measurement_values.get("distance", 1000))))
 
         def refresh_suggested_distance():
             picked_from = int(st.session_state[from_key])
