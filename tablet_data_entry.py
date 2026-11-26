@@ -20,13 +20,6 @@ def _distance_suggestion(trees, measurements, coords, a, b):
     return max(1, int(round(math.dist(position_a, position_b))))
 
 
-def _copy_calculated_to_initial(dataset_pk, tree, initial_x_key, initial_y_key):
-    positions = st.session_state.get(f"tablet_calculated_positions_{dataset_pk}", {})
-    if tree in positions:
-        st.session_state[initial_x_key] = int(round(positions[tree][0]))
-        st.session_state[initial_y_key] = int(round(positions[tree][1]))
-
-
 render_page_title_selector("Data Entry")
 state = storage.load_dataset_state()
 dataset_pk = state["dataset_pk"]
@@ -54,77 +47,101 @@ if st.session_state[tree_a_key] not in tree_ids:
 if st.session_state[tree_b_key] not in tree_ids or st.session_state[tree_b_key] == st.session_state[tree_a_key]:
     st.session_state[tree_b_key] = next(tree for tree in tree_ids if tree != st.session_state[tree_a_key])
 
-pair = (int(st.session_state[tree_a_key]), int(st.session_state[tree_b_key]))
 last_pair_key = f"{prefix}_last_pair"
-if st.session_state.get(last_pair_key) != pair:
-    coords, _ = solver.run_network_adjustment(trees, measurements)
-    st.session_state[f"{prefix}_distance_ab"] = _distance_suggestion(trees, measurements, coords, *pair)
-    st.session_state[f"{prefix}_distance_ba"] = _distance_suggestion(trees, measurements, coords, pair[1], pair[0])
-    st.session_state[last_pair_key] = pair
+refresh_draft_key = f"{prefix}_refresh_draft_distances"
+refresh_drafts = bool(st.session_state.pop(refresh_draft_key, False))
+previous_pair = st.session_state.get(last_pair_key)
 
 coords, solver_info = solver.run_network_adjustment(trees, measurements)
-st.session_state[f"tablet_calculated_positions_{dataset_pk}"] = coords
-underconstrained = solver.underconstrained_tree_ids(trees, measurements, coords)
 tree2_has_baseline = any({a, b} == {1, 2} for a, b, _ in measurements)
 tree2_axis = "X" if trees.get(2, (0, 1))[0] > trees.get(2, (0, 1))[1] else "Y"
-
-selector_a, selector_b = st.columns(2)
-with selector_a:
-    tree_a = int(st.selectbox("Tree A", tree_ids, key=tree_a_key))
-with selector_b:
-    options_b = [tree for tree in tree_ids if tree != tree_a]
-    if st.session_state[tree_b_key] == tree_a:
-        st.session_state[tree_b_key] = options_b[0]
-    tree_b = int(st.selectbox("Tree B", options_b, key=tree_b_key))
-
-if pair != (tree_a, tree_b):
-    # A pair change initializes the two tape fields from the current network,
-    # while leaving them editable on subsequent Streamlit reruns.
-    st.session_state[f"{prefix}_last_pair"] = pair
-    st.rerun()
 
 measurement_by_pair = {(a, b): int(round(distance)) for a, b, distance in measurements}
 endpoint_columns = st.columns(2)
 initial_changes = {}
-for column, label, tree in zip(endpoint_columns, ("Tree A", "Tree B"), (tree_a, tree_b)):
-    x, y = trees[tree]
-    calc_x, calc_y = coords.get(tree, (None, None))
-    key_x, key_y = f"{prefix}_initial_x_{tree}", f"{prefix}_initial_y_{tree}"
-    if st.session_state.get(f"{prefix}_shown_tree_{label}") != tree:
-        st.session_state[key_x], st.session_state[key_y] = int(x), int(y)
-        st.session_state[f"{prefix}_shown_tree_{label}"] = tree
+tree_selection = {}
+update_tree = None
+for column, label, selector_key in zip(endpoint_columns, ("Tree A", "Tree B"), (tree_a_key, tree_b_key)):
     with column:
         with st.container(border=True):
-            st.markdown(f"### {label} · Tree {tree}")
-            calc_col, copy_col = st.columns([1.2, 1])
-            with calc_col:
-                st.text_input("Calculated X", value="—" if calc_x is None else f"{int(round(calc_x))} mm", disabled=True, key=f"{prefix}_calc_x_{label}")
-                st.text_input("Calculated Y", value="—" if calc_y is None else f"{int(round(calc_y))} mm", disabled=True, key=f"{prefix}_calc_y_{label}")
-            with copy_col:
-                st.write("")
-                st.write("")
-                st.button(
-                    "↓ Copy calculated to initial",
-                    key=f"{prefix}_copy_calc_{label}",
-                    disabled=calc_x is None or tree == 1 or (tree == 2 and tree2_has_baseline),
-                    on_click=_copy_calculated_to_initial,
-                    args=(dataset_pk, tree, key_x, key_y),
+            if label == "Tree A":
+                options = tree_ids
+            else:
+                options = [item for item in tree_ids if item != tree_selection["Tree A"]]
+                if st.session_state[selector_key] not in options:
+                    st.session_state[selector_key] = options[0]
+            selector_col, update_col, copy_col = st.columns([2.2, 0.8, 0.8], vertical_alignment="bottom")
+            with selector_col:
+                tree = int(st.selectbox(
+                    label,
+                    options,
+                    key=selector_key,
+                    format_func=lambda value: "\u00a0" * max(0, 4 - len(str(value))) + str(value),
+                ))
+            tree_selection[label] = tree
+            x, y = trees[tree]
+            calc_x, calc_y = coords.get(tree, (None, None))
+            key_x, key_y = f"{prefix}_initial_x_{tree}", f"{prefix}_initial_y_{tree}"
+            shown_tree_key = f"{prefix}_shown_tree_{label}"
+            if st.session_state.get(shown_tree_key) != tree:
+                st.session_state[key_x], st.session_state[key_y] = int(x), int(y)
+                st.session_state[shown_tree_key] = tree
+            with update_col:
+                update_clicked = st.button(
+                    "Update",
+                    key=f"{prefix}_update_{label}_{tree}",
+                    disabled=tree == 1 or (tree == 2 and tree2_has_baseline),
                     width="stretch",
+                    help=f"Save Tree {tree}'s initial position.",
                 )
-            init_x_col, init_y_col = st.columns(2)
-            with init_x_col:
-                initial_x = st.number_input("Initial X", min_value=1 if tree == 2 and tree2_axis == "X" else 0, value=int(x), step=100, key=key_x, disabled=tree == 1 or (tree == 2 and (tree2_axis != "X" or tree2_has_baseline)))
-            with init_y_col:
-                initial_y = st.number_input("Initial Y", min_value=1 if tree == 2 and tree2_axis == "Y" else 0, value=int(y), step=100, key=key_y, disabled=tree == 1 or (tree == 2 and (tree2_axis != "Y" or tree2_has_baseline)))
-            initial_changes[tree] = (int(initial_x), int(initial_y))
+            with copy_col:
+                copy_clicked = st.button(
+                    "Copy calc",
+                    key=f"{prefix}_copy_{label}_{tree}",
+                    disabled=calc_x is None or tree == 1 or (tree == 2 and tree2_has_baseline),
+                    width="stretch",
+                    help="Copy the calculated X/Y into the initial fields; press Update to save them.",
+                )
+            if copy_clicked and calc_x is not None and calc_y is not None and tree != 1:
+                st.session_state[key_x] = int(round(calc_x))
+                st.session_state[key_y] = int(round(calc_y))
 
-if st.button("Update initial positions", type="primary", width="stretch", key=f"{prefix}_save_initial"):
+            x_col, y_col = st.columns(2)
+            with x_col:
+                st.text_input("Calc X", value="—" if calc_x is None else f"{int(round(calc_x))} mm", disabled=True, key=f"{prefix}_calc_x_{label}_{tree}")
+                initial_x = st.number_input(
+                    "Init X", min_value=1 if tree == 2 and tree2_axis == "X" else 0,
+                    value=int(x), step=100, key=key_x,
+                    disabled=tree == 1 or (tree == 2 and (tree2_axis != "X" or tree2_has_baseline)),
+                )
+            with y_col:
+                st.text_input("Calc Y", value="—" if calc_y is None else f"{int(round(calc_y))} mm", disabled=True, key=f"{prefix}_calc_y_{label}_{tree}")
+                initial_y = st.number_input(
+                    "Init Y", min_value=1 if tree == 2 and tree2_axis == "Y" else 0,
+                    value=int(y), step=100, key=key_y,
+                    disabled=tree == 1 or (tree == 2 and (tree2_axis != "Y" or tree2_has_baseline)),
+                )
+            initial_changes[tree] = (int(initial_x), int(initial_y))
+            if update_clicked:
+                update_tree = tree
+
+tree_a, tree_b = tree_selection["Tree A"], tree_selection["Tree B"]
+current_pair = (tree_a, tree_b)
+if update_tree is not None:
     updated_trees = dict(trees)
-    for tree, position in initial_changes.items():
-        if tree != 1 and (tree != 2 or not tree2_has_baseline):
-            updated_trees[tree] = position
+    if update_tree != 2 or not tree2_has_baseline:
+        updated_trees[update_tree] = initial_changes[update_tree]
     storage.save_trees(updated_trees)
+    st.session_state[refresh_draft_key] = True
     st.rerun()
+
+if previous_pair != current_pair or refresh_drafts:
+    latest_trees = storage.load_trees()
+    latest_measurements = storage.load_measurements(latest_trees)
+    latest_coords, _ = solver.run_network_adjustment(latest_trees, latest_measurements)
+    st.session_state[f"{prefix}_distance_ab"] = _distance_suggestion(latest_trees, latest_measurements, latest_coords, tree_a, tree_b)
+    st.session_state[f"{prefix}_distance_ba"] = _distance_suggestion(latest_trees, latest_measurements, latest_coords, tree_b, tree_a)
+    st.session_state[last_pair_key] = current_pair
 
 st.subheader("Measurements for this pair")
 direction_cols = st.columns(2)
