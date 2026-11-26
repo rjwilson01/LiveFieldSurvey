@@ -69,12 +69,9 @@ def map_to_survey(map_x, map_y):
 def calculatable_tree_ids():
     if not solver_info or not solver_info.get("success") or not solver_info.get("baseline_measured"):
         return set()
-    links = {tree: 0 for tree in tree_ids}
     neighbors = {tree: set() for tree in tree_ids}
     for a, b, _ in measurements:
-        if a in links and b in links:
-            links[a] += 1
-            links[b] += 1
+        if a in neighbors and b in neighbors:
             neighbors[a].add(b)
             neighbors[b].add(a)
     reachable = set()
@@ -84,7 +81,7 @@ def calculatable_tree_ids():
         if tree not in reachable:
             reachable.add(tree)
             pending.extend(neighbors[tree] - reachable)
-    return {tree for tree in tree_ids if tree in (1, 2) or (tree in reachable and links[tree] >= 3)}
+    return {tree for tree in tree_ids if tree in (1, 2) or (tree in reachable and len(neighbors[tree]) >= 3)}
 
 
 def suggested_measurement_distance(from_tree, to_tree):
@@ -256,8 +253,6 @@ with st.sidebar:
         to_default = measurement_values.get("to", tree_ids[1] if len(tree_ids) > 1 else from_default)
         if to_default not in tree_ids or to_default == from_default:
             to_default = next((tree for tree in tree_ids if tree != from_default), from_default)
-        if selected_measurement_index is not None:
-            st.caption(f"Editing record #{selected_measurement_index + 1}. Use Cancel row edit to return to adding.")
         from_key = f"measurement_from_{measurement_revision}"
         to_key = f"measurement_to_{measurement_revision}"
         distance_key = f"measurement_distance_{measurement_revision}"
@@ -267,10 +262,10 @@ with st.sidebar:
         st.session_state.setdefault(to_key, int(to_default))
         if st.session_state[to_key] not in tree_ids or st.session_state[to_key] == st.session_state[from_key]:
             st.session_state[to_key] = int(next((tree for tree in tree_ids if tree != st.session_state[from_key]), st.session_state[from_key]))
-        if selected_measurement_index is not None:
-            st.session_state[distance_key] = max(1, int(measurement_values["distance"]))
-        else:
-            st.session_state.setdefault(distance_key, max(1, int(measurement_values.get("distance", 1000))))
+        st.session_state.setdefault(
+            distance_key,
+            max(1, int(measurement_values.get("distance", 1000))),
+        )
 
         def refresh_suggested_distance():
             picked_from = int(st.session_state[from_key])
@@ -300,6 +295,44 @@ with st.sidebar:
                 st.session_state[to_key] = int(current_to_default)
             with st.container(border=True, key="to-picker"):
                 to_tree = st.selectbox("To tree", tree_ids, key=to_key, on_change=refresh_suggested_distance)
+        matching_record = next(
+            (
+                index
+                for index, (a, b, _) in enumerate(measurements)
+                if a == int(from_tree) and b == int(to_tree)
+            ),
+            None,
+        )
+        if matching_record is not None:
+            previous_selected = st.session_state.get("selected_measurement_index")
+            selected_measurement_index = matching_record
+            st.session_state["selected_measurement_index"] = matching_record
+            st.session_state["highlight_pair"] = tuple(sorted((int(from_tree), int(to_tree))))
+            if previous_selected != matching_record:
+                st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
+                existing_distance = max(1, int(round(measurements[matching_record][2])))
+                st.session_state["measurement_editor_values"] = {
+                    "from": int(from_tree),
+                    "to": int(to_tree),
+                    "distance": existing_distance,
+                }
+                st.session_state[distance_key] = existing_distance
+        elif selected_measurement_index is not None:
+            selected_record = measurements[selected_measurement_index]
+            if selected_record[:2] != (int(from_tree), int(to_tree)):
+                selected_measurement_index = None
+                st.session_state["selected_measurement_index"] = None
+                st.session_state["highlight_pair"] = None
+                st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
+                draft_distance = suggested_measurement_distance(from_tree, to_tree)
+                st.session_state["measurement_editor_values"] = {
+                    "from": int(from_tree),
+                    "to": int(to_tree),
+                    "distance": draft_distance,
+                }
+                st.session_state[distance_key] = draft_distance
+        if selected_measurement_index is not None:
+            st.caption(f"Editing record #{selected_measurement_index + 1}. Select a different pair to add another reading.")
         distance = st.number_input("Distance (mm)", min_value=1, step=1, key=distance_key)
         st.session_state["measurement_editor_values"] = {"from": int(from_tree), "to": int(to_tree), "distance": int(distance)}
         if selected_measurement_index is not None:
@@ -319,9 +352,19 @@ with st.sidebar:
                 st.error("Choose two different trees.")
             else:
                 if selected_measurement_index is None:
-                    duplicate = any(a == int(from_tree) and b == int(to_tree) for a, b, _ in measurements)
+                    duplicate_index = next((index for index, (a, b, _) in enumerate(measurements) if a == int(from_tree) and b == int(to_tree)), None)
+                    duplicate = duplicate_index is not None
                     if duplicate:
-                        st.error(f"Tree {from_tree} → Tree {to_tree} already has a measurement. Select its row to update it.")
+                        st.session_state["selected_measurement_index"] = duplicate_index
+                        st.session_state["highlight_pair"] = tuple(sorted((int(from_tree), int(to_tree))))
+                        st.session_state["measurement_editor_values"] = {
+                            "from": int(from_tree),
+                            "to": int(to_tree),
+                            "distance": int(round(measurements[duplicate_index][2])),
+                        }
+                        st.session_state["measurement_form_revision"] = measurement_revision + 1
+                        st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
+                        st.rerun()
                     else:
                         measurements.append((int(from_tree), int(to_tree), float(distance)))
                         persist_measurements()
@@ -411,14 +454,12 @@ with target_toggle:
         help="Hide the faint grid dots when they make it hard to tap measurement lines.",
     )
 
-degree = {t: 0 for t in tree_ids}
 adjacency = {t: set() for t in tree_ids}
 for a, b, _ in measurements:
-    if a in degree and b in degree:
-        degree[a] += 1
-        degree[b] += 1
+    if a in adjacency and b in adjacency:
         adjacency[a].add(b)
         adjacency[b].add(a)
+degree = {tree: len(neighbors) for tree, neighbors in adjacency.items()}
 reachable = set()
 stack = [1] if 1 in adjacency else []
 while stack:

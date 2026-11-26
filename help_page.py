@@ -120,7 +120,7 @@ with st.expander("Set the map reference", expanded=True):
     - Tree 2 lies on either the positive **X axis** or positive **Y axis**, selected above. The other coordinate stays at zero.
     - The Tree 1 ↔ Tree 2 baseline is a regular measurement. If you save Tree 2 with a nonzero starting coordinate before adding a baseline reading, the app creates a 1 → 2 measurement from that distance. Later baseline edits set Tree 2's coordinate to the measured distance on its selected axis.
     - The map keeps a small negative margin so the origin markers and axis remain visible.
-    - Gray lines show recorded measurements. Amber trees need more links or a connection to the anchored network.
+    - Gray lines show recorded measurements. Amber trees need links to at least three different trees and a connection to the anchored network.
     """)
 
 with st.expander("Add trees and set starting positions", expanded=True):
@@ -152,8 +152,8 @@ with st.expander("Map legend and calculated locations"):
     st.markdown("""
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:0.55rem 1rem;padding:0.4rem 0;">
       <div><span style="color:#2563eb;font-size:1.2rem;">●</span> <b>Blue trees</b> — Trees 1 and 2, the anchors</div>
-      <div><span style="color:#15803d;font-size:1.2rem;">●</span> <b>Green trees</b> — enough links to adjust</div>
-      <div><span style="color:#f59e0b;font-size:1.2rem;">●</span> <b>Amber trees</b> — need more links or an anchor connection</div>
+      <div><span style="color:#15803d;font-size:1.2rem;">●</span> <b>Green trees</b> — connected to the anchors and linked to at least three other trees</div>
+      <div><span style="color:#f59e0b;font-size:1.2rem;">●</span> <b>Amber trees</b> — need more distinct tree links or an anchor connection</div>
       <div><span style="color:#9aa4b2;font-size:1.2rem;">━</span> <b>Gray lines</b> — recorded measurements</div>
       <div><span style="color:#f97316;font-size:1.2rem;">━</span> <b>Orange line</b> — selected tree pair</div>
       <div><span style="color:#94a3b8;font-size:1.2rem;">●</span> <b>Faint dots</b> — starting-estimate placement targets</div>

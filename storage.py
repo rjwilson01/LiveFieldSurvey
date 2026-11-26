@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import os
+import time
 
 import streamlit as st
 import psycopg
@@ -19,6 +20,7 @@ DEFAULT_MAP_ORIENTATION = {
     "mirror_map_y": False,
 }
 MIGRATION_VERSION = "001_initial"
+DATA_CACHE_TTL_SECONDS = 120
 
 
 class StorageConfigurationError(RuntimeError):
@@ -75,7 +77,7 @@ def _connection_pool():
         min_size=0,
         max_size=5,
         timeout=15,
-        max_idle=60,
+        max_idle=300,
         max_lifetime=900,
         check=ConnectionPool.check_connection,
         open=True,
@@ -104,18 +106,74 @@ def _executemany(conn, query, params):
         cursor.executemany(query, params)
 
 
-def _read_rows(query, params=(), *, one=False):
-    """Run an idempotent read, replacing a connection lost while the app slept."""
+def _read_connection(operation):
+    """Run a read-only operation, replacing a connection lost while the app slept."""
     pool = _connection_pool()
     for attempt in range(2):
         try:
             with pool.connection() as conn:
-                cursor = conn.execute(query, params)
-                return cursor.fetchone() if one else cursor.fetchall()
+                return operation(conn)
         except psycopg.OperationalError:
             if attempt:
                 raise
     raise RuntimeError("Database read retry exhausted unexpectedly.")
+
+
+def _read_rows(query, params=(), *, one=False):
+    def read(conn):
+        cursor = conn.execute(query, params)
+        return cursor.fetchone() if one else cursor.fetchall()
+
+    return _read_connection(read)
+
+
+def _read_dataset_snapshot(dataset_pk):
+    def read(conn):
+        info_row = conn.execute(
+            "SELECT id, name, serial, dataset_id, next_tree_id, map_axis_layout, "
+            "mirror_map_x, mirror_map_y, created_at FROM survey_datasets WHERE id = %s",
+            (dataset_pk,),
+        ).fetchone()
+        info = _dataset_info_from_row(info_row)
+        tree_rows = conn.execute(
+            "SELECT tree_id, x, y FROM survey_trees WHERE dataset_id = %s ORDER BY tree_id",
+            (dataset_pk,),
+        ).fetchall()
+        measurement_rows = conn.execute(
+            "SELECT tree_a, tree_b, distance_mm FROM survey_measurements "
+            "WHERE dataset_id = %s ORDER BY record_id",
+            (dataset_pk,),
+        ).fetchall()
+        trees = {int(tree): (int(x), int(y)) for tree, x, y in tree_rows}
+        measurements = [
+            (int(a), int(b), float(distance))
+            for a, b, distance in measurement_rows
+            if int(a) in trees and int(b) in trees and int(a) != int(b) and float(distance) > 0
+        ]
+        return {"dataset_pk": dataset_pk, "info": info, "trees": trees, "measurements": measurements}
+
+    snapshot = _read_connection(read)
+    snapshot["loaded_at"] = time.monotonic()
+    return snapshot
+
+
+def _dataset_snapshot(dataset_pk=None, *, force=False):
+    selected = _active_dataset_id(dataset_pk)
+    cached = st.session_state.get("_neon_dataset_snapshot")
+    if (
+        not force
+        and cached
+        and cached.get("dataset_pk") == selected
+        and time.monotonic() - cached.get("loaded_at", 0) < DATA_CACHE_TTL_SECONDS
+    ):
+        return cached
+    snapshot = _read_dataset_snapshot(selected)
+    st.session_state["_neon_dataset_snapshot"] = snapshot
+    return snapshot
+
+
+def _refresh_dataset_list_cache():
+    st.session_state.pop("_neon_dataset_list", None)
 
 
 def _next_serial(conn, preferred=None):
@@ -166,16 +224,27 @@ def create_dataset(name):
         "dataset_pk": dataset_pk,
     }
     st.session_state["active_dataset_pk"] = dataset_pk
+    st.session_state["_neon_dataset_snapshot"] = {
+        "dataset_pk": dataset_pk,
+        "info": dict(info),
+        "trees": {1: (0, 0), 2: (0, 1)},
+        "measurements": [],
+        "loaded_at": time.monotonic(),
+    }
+    _refresh_dataset_list_cache()
     return info
 
 
 def list_datasets():
     """List datasets in the Neon database, preserving the app's selector shape."""
+    cached = st.session_state.get("_neon_dataset_list")
+    if cached and time.monotonic() - cached["loaded_at"] < DATA_CACHE_TTL_SECONDS:
+        return [dict(dataset) for dataset in cached["datasets"]]
     rows = _read_rows(
         "SELECT id, dataset_id, name, serial "
         "FROM survey_datasets ORDER BY serial, id"
     )
-    return [
+    datasets = [
         {
             "dataset_pk": row[0],
             "dataset_id": row[1],
@@ -184,6 +253,11 @@ def list_datasets():
         }
         for row in rows
     ]
+    st.session_state["_neon_dataset_list"] = {
+        "datasets": datasets,
+        "loaded_at": time.monotonic(),
+    }
+    return [dict(dataset) for dataset in datasets]
 
 
 def _dataset_info_from_row(row):
@@ -203,37 +277,52 @@ def _dataset_info_from_row(row):
 
 
 def load_dataset_info(dataset_pk=None):
-    selected = _active_dataset_id(dataset_pk)
-    row = _read_rows(
-        "SELECT id, name, serial, dataset_id, next_tree_id, map_axis_layout, "
-        "mirror_map_x, mirror_map_y, created_at "
-        "FROM survey_datasets WHERE id = %s",
-        (selected,),
-        one=True,
-    )
-    return _dataset_info_from_row(row)
+    return dict(_dataset_snapshot(dataset_pk)["info"])
 
 
 def save_dataset_info(info, dataset_pk=None):
     selected = _active_dataset_id(dataset_pk or info.get("dataset_pk"))
+    snapshot = _dataset_snapshot(selected)
     name = str(info.get("name", "Field Survey")).strip() or "Field Survey"
     serial = int(info["serial"])
     dataset_id = f"{name}-{serial:03d}"
-    with _connection_pool().connection() as conn:
-        conn.execute(
-            "UPDATE survey_datasets SET name = %s, dataset_id = %s, next_tree_id = %s, "
-            "map_axis_layout = %s, mirror_map_x = %s, mirror_map_y = %s WHERE id = %s",
-            (
-                name,
-                dataset_id,
-                max(3, int(info.get("next_tree_id", 3))),
-                info.get("map_axis_layout", DEFAULT_MAP_ORIENTATION["map_axis_layout"]),
-                bool(info.get("mirror_map_x", False)),
-                bool(info.get("mirror_map_y", False)),
-                selected,
-            ),
-        )
-    return {**info, "name": name, "dataset_id": dataset_id, "serial": serial}
+    updated = {
+        **snapshot["info"],
+        **info,
+        "dataset_pk": selected,
+        "name": name,
+        "dataset_id": dataset_id,
+        "serial": serial,
+        "next_tree_id": max(3, int(info.get("next_tree_id", 3))),
+        "map_axis_layout": info.get("map_axis_layout", DEFAULT_MAP_ORIENTATION["map_axis_layout"]),
+        "mirror_map_x": bool(info.get("mirror_map_x", False)),
+        "mirror_map_y": bool(info.get("mirror_map_y", False)),
+    }
+    old = snapshot["info"]
+    dataset_identity_changed = updated["name"] != old.get("name") or updated["dataset_id"] != old.get("dataset_id")
+    changed = any(updated[key] != old.get(key) for key in (
+        "name", "dataset_id", "next_tree_id", "map_axis_layout", "mirror_map_x", "mirror_map_y"
+    ))
+    if changed:
+        with _connection_pool().connection() as conn:
+            conn.execute(
+                "UPDATE survey_datasets SET name = %s, dataset_id = %s, next_tree_id = %s, "
+                "map_axis_layout = %s, mirror_map_x = %s, mirror_map_y = %s WHERE id = %s",
+                (
+                    updated["name"],
+                    updated["dataset_id"],
+                    updated["next_tree_id"],
+                    updated["map_axis_layout"],
+                    updated["mirror_map_x"],
+                    updated["mirror_map_y"],
+                    selected,
+                ),
+            )
+        snapshot["info"] = updated
+        snapshot["loaded_at"] = time.monotonic()
+        if dataset_identity_changed:
+            _refresh_dataset_list_cache()
+    return dict(updated)
 
 
 def rename_dataset(name):
@@ -257,106 +346,122 @@ def set_tree2_reference_axis(axis):
     axis = str(axis).upper()
     if axis not in ("X", "Y"):
         raise ValueError("Tree 2 reference axis must be X or Y.")
-    dataset_id = _active_dataset_id()
-    with _connection_pool().connection() as conn:
-        baseline = conn.execute(
-            "SELECT distance_mm FROM survey_measurements WHERE dataset_id = %s "
-            "AND ((tree_a = 1 AND tree_b = 2) OR (tree_a = 2 AND tree_b = 1))",
-            (dataset_id,),
-        ).fetchall()
-        row = conn.execute(
-            "SELECT x, y FROM survey_trees WHERE dataset_id = %s AND tree_id = 2",
-            (dataset_id,),
-        ).fetchone()
-        current_x, current_y = row if row else (0, 1)
-        distance = (
-            int(round(sum(float(item[0]) for item in baseline) / len(baseline)))
-            if baseline
-            else int(round(max(current_x, current_y)))
-        )
-        distance = max(distance, 1)
-        position = (distance, 0) if axis == "X" else (0, distance)
-        conn.execute(
-            "INSERT INTO survey_trees (dataset_id, tree_id, x, y) VALUES (%s, 2, %s, %s) "
-            "ON CONFLICT (dataset_id, tree_id) DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y",
-            (dataset_id, *position),
-        )
+    snapshot = _dataset_snapshot()
+    baseline = [d for a, b, d in snapshot["measurements"] if {a, b} == {1, 2}]
+    current_x, current_y = snapshot["trees"].get(2, (0, 1))
+    distance = (
+        int(round(sum(baseline) / len(baseline)))
+        if baseline
+        else int(round(max(current_x, current_y)))
+    )
+    distance = max(distance, 1)
+    position = (distance, 0) if axis == "X" else (0, distance)
+    updated_trees = dict(snapshot["trees"])
+    updated_trees[2] = position
+    save_trees(updated_trees)
     return position
 
 
 def mark_tree_id_used(tree_id):
     dataset_id = _active_dataset_id()
-    with _connection_pool().connection() as conn:
-        conn.execute(
-            "UPDATE survey_datasets SET next_tree_id = GREATEST(next_tree_id, %s) WHERE id = %s",
-            (int(tree_id) + 1, dataset_id),
-        )
+    snapshot = _dataset_snapshot(dataset_id)
+    next_id = max(int(snapshot["info"].get("next_tree_id", 3)), int(tree_id) + 1)
+    if next_id > int(snapshot["info"].get("next_tree_id", 3)):
+        with _connection_pool().connection() as conn:
+            conn.execute(
+                "UPDATE survey_datasets SET next_tree_id = %s WHERE id = %s",
+                (next_id, dataset_id),
+            )
+        snapshot["info"]["next_tree_id"] = next_id
+        snapshot["loaded_at"] = time.monotonic()
 
 
 def load_trees():
-    dataset_id = _active_dataset_id()
-    rows = _read_rows(
-        "SELECT tree_id, x, y FROM survey_trees WHERE dataset_id = %s ORDER BY tree_id",
-        (dataset_id,),
-    )
-    return {int(tree): (int(x), int(y)) for tree, x, y in rows}
+    return dict(_dataset_snapshot()["trees"])
 
 
 def save_trees(trees_dict):
     dataset_id = _active_dataset_id()
+    snapshot = _dataset_snapshot(dataset_id)
     normalized = {
         int(tree): (0 if int(tree) == 1 else int(round(x)), 0 if int(tree) == 1 else int(round(y)))
         for tree, (x, y) in trees_dict.items()
     }
     if 1 not in normalized:
         normalized[1] = (0, 0)
-    with _connection_pool().connection() as conn:
-        existing = {
-            int(row[0]) for row in conn.execute(
-                "SELECT tree_id FROM survey_trees WHERE dataset_id = %s", (dataset_id,)
-            ).fetchall()
-        }
-        for tree in existing - normalized.keys():
-            conn.execute(
-                "DELETE FROM survey_trees WHERE dataset_id = %s AND tree_id = %s",
-                (dataset_id, tree),
-            )
-        _executemany(conn,
-            "INSERT INTO survey_trees (dataset_id, tree_id, x, y) VALUES (%s, %s, %s, %s) "
-            "ON CONFLICT (dataset_id, tree_id) DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y",
-            [(dataset_id, tree, x, y) for tree, (x, y) in normalized.items()],
-        )
+    existing = snapshot["trees"]
+    removed = set(existing) - set(normalized)
+    changed = {
+        tree: position
+        for tree, position in normalized.items()
+        if tree not in existing or existing[tree] != position
+    }
+    if removed or changed:
+        with _connection_pool().connection() as conn:
+            for tree in removed:
+                conn.execute(
+                    "DELETE FROM survey_trees WHERE dataset_id = %s AND tree_id = %s",
+                    (dataset_id, tree),
+                )
+            if changed:
+                _executemany(
+                    conn,
+                    "INSERT INTO survey_trees (dataset_id, tree_id, x, y) VALUES (%s, %s, %s, %s) "
+                    "ON CONFLICT (dataset_id, tree_id) DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y "
+                    "WHERE (survey_trees.x, survey_trees.y) IS DISTINCT FROM (EXCLUDED.x, EXCLUDED.y)",
+                    [(dataset_id, tree, x, y) for tree, (x, y) in changed.items()],
+                )
+        snapshot["trees"] = normalized
+        snapshot["loaded_at"] = time.monotonic()
 
 
 def load_measurements(trees_dict):
-    dataset_id = _active_dataset_id()
     tree_ids = set(trees_dict)
-    rows = _read_rows(
-        "SELECT tree_a, tree_b, distance_mm FROM survey_measurements "
-        "WHERE dataset_id = %s ORDER BY record_id",
-        (dataset_id,),
-    )
     return [
-        (int(a), int(b), float(distance))
-        for a, b, distance in rows
-        if int(a) in tree_ids and int(b) in tree_ids and int(a) != int(b) and float(distance) > 0
+        (a, b, distance)
+        for a, b, distance in _dataset_snapshot()["measurements"]
+        if a in tree_ids and b in tree_ids
     ]
 
 
 def save_measurements(measurements):
     dataset_id = _active_dataset_id()
+    snapshot = _dataset_snapshot(dataset_id)
     directed = {}
     for a, b, distance in measurements:
         a, b, distance = int(a), int(b), float(distance)
         if a != b and distance > 0:
             directed[(a, b)] = distance
-    with _connection_pool().connection() as conn:
-        conn.execute("DELETE FROM survey_measurements WHERE dataset_id = %s", (dataset_id,))
-        _executemany(conn,
-            "INSERT INTO survey_measurements (dataset_id, tree_a, tree_b, distance_mm) "
-            "VALUES (%s, %s, %s, %s)",
-            [(dataset_id, a, b, distance) for (a, b), distance in directed.items()],
-        )
+    existing = {(a, b): distance for a, b, distance in snapshot["measurements"]}
+    removed = set(existing) - set(directed)
+    changed = {
+        pair: distance
+        for pair, distance in directed.items()
+        if pair not in existing or existing[pair] != distance
+    }
+    if removed or changed:
+        with _connection_pool().connection() as conn:
+            for a, b in removed:
+                conn.execute(
+                    "DELETE FROM survey_measurements "
+                    "WHERE dataset_id = %s AND tree_a = %s AND tree_b = %s",
+                    (dataset_id, a, b),
+                )
+            if changed:
+                _executemany(
+                    conn,
+                    "INSERT INTO survey_measurements (dataset_id, tree_a, tree_b, distance_mm) "
+                    "VALUES (%s, %s, %s, %s) "
+                    "ON CONFLICT (dataset_id, tree_a, tree_b) DO UPDATE "
+                    "SET distance_mm = EXCLUDED.distance_mm "
+                    "WHERE survey_measurements.distance_mm IS DISTINCT FROM EXCLUDED.distance_mm",
+                    [(dataset_id, a, b, distance) for (a, b), distance in changed.items()],
+                )
+        ordered = [(a, b, d) for a, b, d in snapshot["measurements"] if (a, b) in directed]
+        known = {(a, b) for a, b, _ in ordered}
+        ordered.extend((a, b, d) for (a, b), d in directed.items() if (a, b) not in known)
+        snapshot["measurements"] = ordered
+        snapshot["loaded_at"] = time.monotonic()
 
 
 def append_measurement(a, b, distance_mm):
