@@ -3,7 +3,7 @@ import math
 import pandas as pd
 import streamlit as st
 
-import solver
+import field_survey_solver as solver
 import storage
 from page_navigation import render_page_title_selector
 from map_view import build_survey_map
