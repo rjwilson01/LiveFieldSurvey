@@ -2,6 +2,8 @@ import streamlit as st
 
 
 PAGE_PATHS = {
+    "Map": "map_page.py",
+    "Data Entry": "tablet_data_entry.py",
     "Data Entry & Mapping": "data_entry.py",
     "Help": "help_page.py",
     "Data management": "data_management.py",

@@ -280,6 +280,17 @@ def load_dataset_info(dataset_pk=None):
     return dict(_dataset_snapshot(dataset_pk)["info"])
 
 
+def load_dataset_state(dataset_pk=None, *, force=False):
+    """Return one consistent in-memory view of a dataset for page rendering."""
+    snapshot = _dataset_snapshot(dataset_pk, force=force)
+    return {
+        "dataset_pk": snapshot["dataset_pk"],
+        "info": dict(snapshot["info"]),
+        "trees": dict(snapshot["trees"]),
+        "measurements": list(snapshot["measurements"]),
+    }
+
+
 def save_dataset_info(info, dataset_pk=None):
     selected = _active_dataset_id(dataset_pk or info.get("dataset_pk"))
     snapshot = _dataset_snapshot(selected)

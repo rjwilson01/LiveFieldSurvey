@@ -1,13 +1,12 @@
 import math
 
 import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
 import streamlit as st
 
 import solver
 import storage
 from page_navigation import render_page_title_selector
+from map_view import build_survey_map
 
 
 storage.init_files()
@@ -55,33 +54,10 @@ mirror_map_x = bool(st.session_state.get("mirror_map_x", False))
 mirror_map_y = bool(st.session_state.get("mirror_map_y", False))
 
 
-def survey_to_map(x, y):
-    signed_x = -x if mirror_map_x else x
-    signed_y = -y if mirror_map_y else y
-    return (signed_y, signed_x) if swap_map_axes else (signed_x, signed_y)
-
-
-def map_to_survey(map_x, map_y):
-    signed_x, signed_y = (map_y, map_x) if swap_map_axes else (map_x, map_y)
-    return (-signed_x if mirror_map_x else signed_x, -signed_y if mirror_map_y else signed_y)
-
-
 def calculatable_tree_ids():
-    if not solver_info or not solver_info.get("success") or not solver_info.get("baseline_measured"):
+    if not solver_info or not solver_info.get("baseline_measured"):
         return set()
-    neighbors = {tree: set() for tree in tree_ids}
-    for a, b, _ in measurements:
-        if a in neighbors and b in neighbors:
-            neighbors[a].add(b)
-            neighbors[b].add(a)
-    reachable = set()
-    pending = [1]
-    while pending:
-        tree = pending.pop()
-        if tree not in reachable:
-            reachable.add(tree)
-            pending.extend(neighbors[tree] - reachable)
-    return {tree for tree in tree_ids if tree in (1, 2) or (tree in reachable and len(neighbors[tree]) >= 3)}
+    return set(tree_ids) - solver.underconstrained_tree_ids(trees, measurements, coords)
 
 
 def suggested_measurement_distance(from_tree, to_tree):
@@ -454,73 +430,23 @@ with target_toggle:
         help="Hide the faint grid dots when they make it hard to tap measurement lines.",
     )
 
-adjacency = {t: set() for t in tree_ids}
-for a, b, _ in measurements:
-    if a in adjacency and b in adjacency:
-        adjacency[a].add(b)
-        adjacency[b].add(a)
-degree = {tree: len(neighbors) for tree, neighbors in adjacency.items()}
-reachable = set()
-stack = [1] if 1 in adjacency else []
-while stack:
-    current = stack.pop()
-    if current not in reachable:
-        reachable.add(current)
-        stack.extend(adjacency[current] - reachable)
-underconstrained = {t for t in tree_ids if t not in (1, 2) and (t not in reachable or degree[t] < 3)}
-
-fig = go.Figure()
-horizontal_sign = -1 if (mirror_map_y if swap_map_axes else mirror_map_x) else 1
-vertical_sign = -1 if (mirror_map_x if swap_map_axes else mirror_map_y) else 1
-if coords:
-    # Faint grid targets make a tap on the map a quick approximate placement
-    # gesture on touch screens. Numeric estimate fields remain available too.
-    extent_points = [survey_to_map(*point) for point in list(trees.values()) + list(coords.values())]
-    max_x = max(1000, max(abs(point[0]) for point in extent_points) + 1000)
-    max_y = max(1000, max(abs(point[1]) for point in extent_points) + 1000)
-    x_padding = max(100, int(max_x * 0.03))
-    y_padding = max(100, int(max_y * 0.03))
-    fig.add_shape(
-        type="rect",
-        x0=0 if horizontal_sign > 0 else -max_x,
-        x1=max_x if horizontal_sign > 0 else 0,
-        y0=0 if vertical_sign > 0 else -max_y,
-        y1=max_y if vertical_sign > 0 else 0,
-        fillcolor="rgba(34,197,94,0.045)",
-        line={"width": 0},
-        layer="below",
-    )
-    grid_x = np.linspace(0, max_x, 25) * horizontal_sign
-    grid_y = np.linspace(0, max_y, 25) * vertical_sign
-    grid_display_points = [(float(x), float(y)) for x in grid_x for y in grid_y]
-    tap_points = [map_to_survey(x, y) for x, y in grid_display_points]
-    fig.add_trace(go.Scatter(x=[p[0] for p in grid_display_points], y=[p[1] for p in grid_display_points], customdata=tap_points, mode="markers", marker={"size": 18, "color": "rgba(100,116,139,0.20)"}, hovertemplate="Tap to set starting estimate<br>Survey X %{customdata[0]:.0f} mm<br>Survey Y %{customdata[1]:.0f} mm<extra></extra>", showlegend=False, visible=show_starting_targets, name="Starting estimate targets"))
-    for measurement_index, (a, b, d) in enumerate(measurements):
-        if a in coords and b in coords:
-            xa, ya = survey_to_map(*coords[a])
-            xb, yb = survey_to_map(*coords[b])
-            midpoint_x, midpoint_y = (xa + xb) / 2, (ya + yb) / 2
-            line_color = "#f97316" if st.session_state.get("highlight_pair") == tuple(sorted((a, b))) else "#9aa4b2"
-            fig.add_trace(go.Scatter(x=[xa, midpoint_x, xb], y=[ya, midpoint_y, yb], mode="lines+markers", line={"color": line_color, "width": 3 if line_color == "#f97316" else 2}, marker={"size": [1, 18, 1], "color": [line_color, "rgba(100,116,139,0.015)", line_color]}, customdata=[[measurement_index, a, b]] * 3, hovertemplate=f"{a} → {b}: {d:.0f} mm<extra></extra>", showlegend=False))
-
-    # Optional estimates are hidden by default so they cannot obscure tree taps.
-    estimate_points = [survey_to_map(*trees[t]) for t in tree_ids]
-    fig.add_trace(go.Scatter(x=[point[0] for point in estimate_points], y=[point[1] for point in estimate_points], customdata=[[trees[t][0], trees[t][1]] for t in tree_ids], mode="markers", name="Initial estimates", visible=show_estimates, showlegend=False, marker={"symbol": "circle-open", "size": 12, "color": "#64748b", "line": {"width": 2}}, text=[str(t) for t in tree_ids], hovertemplate="Initial estimate · Tree %{text}<br>Survey X %{customdata[0]:.0f} mm<br>Survey Y %{customdata[1]:.0f} mm<extra></extra>"))
-    colors = ["#f59e0b" if t in underconstrained else ("#2563eb" if t in (1, 2) else "#15803d") for t in tree_ids]
-    adjusted_points = [survey_to_map(*coords[t]) for t in tree_ids]
-    fig.add_trace(go.Scatter(x=[point[0] for point in adjusted_points], y=[point[1] for point in adjusted_points], mode="markers+text", name="Adjusted positions", showlegend=False, text=[str(t) for t in tree_ids], textposition="top center", marker={"size": 15, "color": colors, "line": {"color": "white", "width": 1}}, customdata=[[degree[t], t in underconstrained, t, coords[t][0], coords[t][1]] for t in tree_ids], hovertemplate="Tree %{text}<br>Survey X %{customdata[3]:.0f} mm<br>Survey Y %{customdata[4]:.0f} mm<br>Links: %{customdata[0]}<extra></extra>"))
-else:
-    max_x = max_y = 1000
-    x_padding = y_padding = 100
-horizontal_axis_name = "Y" if swap_map_axes else "X"
-vertical_axis_name = "X" if swap_map_axes else "Y"
-x_range = [-x_padding, max_x] if horizontal_sign > 0 else [-max_x, x_padding]
-y_range = [-y_padding, max_y] if vertical_sign > 0 else [-max_y, y_padding]
-fig.update_layout(height=620, margin={"l": 10, "r": 10, "t": 20, "b": 10}, xaxis={"title": f"{horizontal_axis_name} (mm)", "range": x_range, "zeroline": True, "scaleanchor": "y", "scaleratio": 1, "constrain": "domain", "constraintoward": "left"}, yaxis={"title": f"{vertical_axis_name} (mm)", "range": y_range, "zeroline": True, "constrain": "domain", "constraintoward": "bottom"}, showlegend=False)
+underconstrained = solver.underconstrained_tree_ids(trees, measurements, coords)
 map_revision = st.session_state.get("map_revision", 0)
-fig.update_layout(autosize=True, uirevision=f"survey-map-{swap_map_axes}-{mirror_map_x}-{mirror_map_y}")
 active_picker = "from-picker" if st.session_state["measurement_next_field"] == "from" else "to-picker"
 st.markdown(f"<style>.st-key-{active_picker} [data-testid='stVerticalBlockBorderWrapper'] {{ border: 3px solid #16a34a !important; border-radius: 0.75rem; }}</style>", unsafe_allow_html=True)
+fig = build_survey_map(
+    trees,
+    measurements,
+    coords,
+    underconstrained,
+    axis_layout=st.session_state.get("map_axis_layout", dataset_info.get("map_axis_layout")),
+    mirror_x=bool(st.session_state.get("mirror_map_x", dataset_info.get("mirror_map_x", False))),
+    mirror_y=bool(st.session_state.get("mirror_map_y", dataset_info.get("mirror_map_y", False))),
+    show_initial_estimates=show_estimates,
+    show_starting_targets=show_starting_targets,
+    include_target_trace=True,
+    highlight_pair=st.session_state.get("highlight_pair"),
+)
 map_event = st.plotly_chart(fig, key=f"survey_map_{map_revision}", on_select="rerun", selection_mode="points", config={"responsive": True, "scrollZoom": False})
 try:
     selected_points = map_event.selection.points

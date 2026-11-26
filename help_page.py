@@ -18,6 +18,13 @@ def save_tree2_axis():
 render_page_title_selector("Help")
 st.caption("Record tree-to-tree tape distances and adjust the map with least squares. Enter coordinates and distances in millimetres.")
 
+with st.expander("Tablet pages", expanded=True):
+    st.markdown("""
+    - **Map** is a map-only view for a second tablet. It has no estimate placement targets and can refresh from Neon on a timer. The refresh applies only on this page, so it will not clear an unfinished edit on the Data Entry page.
+    - **Data Entry** edits both directed measurements between a selected pair of trees, shows both starting and adjusted positions, and lets you copy adjusted positions back to the starting estimates. Its measurement table selection is local to this page.
+    - **Data Entry & Mapping** keeps the original combined workflow, including map picks and the sidebar editors.
+    """)
+
 tree2_position = storage.load_trees().get(2, (0, 1))
 tree2_reference_axis = "X" if tree2_position[0] > tree2_position[1] else "Y"
 st.session_state["tree2_reference_axis"] = tree2_reference_axis
@@ -120,7 +127,7 @@ with st.expander("Set the map reference", expanded=True):
     - Tree 2 lies on either the positive **X axis** or positive **Y axis**, selected above. The other coordinate stays at zero.
     - The Tree 1 ↔ Tree 2 baseline is a regular measurement. If you save Tree 2 with a nonzero starting coordinate before adding a baseline reading, the app creates a 1 → 2 measurement from that distance. Later baseline edits set Tree 2's coordinate to the measured distance on its selected axis.
     - The map keeps a small negative margin so the origin markers and axis remain visible.
-    - Gray lines show recorded measurements. Amber trees need links to at least three different trees and a connection to the anchored network.
+    - Gray lines show recorded measurements. Amber means the distance network still allows that tree's position to move; it does not simply count links. Green means the local distance geometry fixes that tree relative to the anchored network.
     """)
 
 with st.expander("Add trees and set starting positions", expanded=True):
@@ -152,8 +159,8 @@ with st.expander("Map legend and calculated locations"):
     st.markdown("""
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:0.55rem 1rem;padding:0.4rem 0;">
       <div><span style="color:#2563eb;font-size:1.2rem;">●</span> <b>Blue trees</b> — Trees 1 and 2, the anchors</div>
-      <div><span style="color:#15803d;font-size:1.2rem;">●</span> <b>Green trees</b> — connected to the anchors and linked to at least three other trees</div>
-      <div><span style="color:#f59e0b;font-size:1.2rem;">●</span> <b>Amber trees</b> — need more distinct tree links or an anchor connection</div>
+      <div><span style="color:#15803d;font-size:1.2rem;">●</span> <b>Green trees</b> — local distance geometry fixes the position relative to the anchors</div>
+      <div><span style="color:#f59e0b;font-size:1.2rem;">●</span> <b>Amber trees</b> — the distance network still allows the position to move</div>
       <div><span style="color:#9aa4b2;font-size:1.2rem;">━</span> <b>Gray lines</b> — recorded measurements</div>
       <div><span style="color:#f97316;font-size:1.2rem;">━</span> <b>Orange line</b> — selected tree pair</div>
       <div><span style="color:#94a3b8;font-size:1.2rem;">●</span> <b>Faint dots</b> — starting-estimate placement targets</div>
@@ -162,6 +169,7 @@ with st.expander("Map legend and calculated locations"):
     """, unsafe_allow_html=True)
     st.markdown("""
     - The least-squares adjustment uses the recorded distances and starting estimates. A calculated location appears in Tree management once available. “Adjusted location so far” means the network is still incomplete, so treat that position as provisional.
+    - The amber/green check uses the distance Jacobian's null space. This tests whether a small coordinate movement can leave all recorded distances unchanged, so two well-placed measurements can fix a tree while several redundant measurements in one direction may not.
     - A large shift warning means a tree moved farther than the editable estimate threshold. This can be expected when a rough map tap is replaced by stronger measurement evidence.
     - Use **Show initial estimates** to compare the saved starting positions with adjusted positions. Use **Show placement targets** to make the faint tap grid visible or hide it for easier line selection. Both choices stay selected as you work on the map.
     """)
