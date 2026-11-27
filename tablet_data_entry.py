@@ -20,6 +20,12 @@ def _distance_suggestion(trees, measurements, coords, a, b):
     return max(1, int(round(math.dist(position_a, position_b))))
 
 
+def _swap_tree_pair(tree_a_key, tree_b_key):
+    tree_a = st.session_state[tree_a_key]
+    st.session_state[tree_a_key] = st.session_state[tree_b_key]
+    st.session_state[tree_b_key] = tree_a
+
+
 render_page_title_selector("Data Entry")
 state = storage.load_dataset_state()
 dataset_pk = state["dataset_pk"]
@@ -35,6 +41,7 @@ if len(tree_ids) < 2:
 
 prefix = f"tablet_{dataset_pk}"
 pending_pair = st.session_state.pop(f"{prefix}_pending_pair", None)
+pair_from_table = pending_pair is not None
 if pending_pair:
     st.session_state[f"{prefix}_tree_a"] = int(pending_pair[0])
     st.session_state[f"{prefix}_tree_b"] = int(pending_pair[1])
@@ -70,7 +77,10 @@ for column, label, selector_key in zip(endpoint_columns, ("Tree A", "Tree B"), (
                 options = [item for item in tree_ids if item != tree_selection["Tree A"]]
                 if st.session_state[selector_key] not in options:
                     st.session_state[selector_key] = options[0]
-            selector_col, update_col, copy_col = st.columns([2.2, 0.8, 0.8], vertical_alignment="bottom")
+            if label == "Tree B":
+                selector_col, swap_col, update_col, copy_col = st.columns([2.0, 0.45, 0.8, 0.8], vertical_alignment="bottom")
+            else:
+                selector_col, update_col, copy_col = st.columns([2.2, 0.8, 0.8], vertical_alignment="bottom")
             with selector_col:
                 tree = int(st.selectbox(
                     label,
@@ -86,6 +96,17 @@ for column, label, selector_key in zip(endpoint_columns, ("Tree A", "Tree B"), (
             if st.session_state.get(shown_tree_key) != tree:
                 st.session_state[key_x], st.session_state[key_y] = int(x), int(y)
                 st.session_state[shown_tree_key] = tree
+            if label == "Tree B":
+                with swap_col:
+                    st.button(
+                        "↔",
+                        key=f"{prefix}_swap_pair",
+                        disabled=tree_selection["Tree A"] < tree,
+                        on_click=_swap_tree_pair,
+                        args=(tree_a_key, tree_b_key),
+                        width="stretch",
+                        help="Swap Tree A and Tree B; available when A is greater than B.",
+                    )
             with update_col:
                 update_clicked = st.button(
                     "Update",
@@ -127,6 +148,8 @@ for column, label, selector_key in zip(endpoint_columns, ("Tree A", "Tree B"), (
 
 tree_a, tree_b = tree_selection["Tree A"], tree_selection["Tree B"]
 current_pair = (tree_a, tree_b)
+if previous_pair != current_pair and not pair_from_table:
+    st.session_state.pop(f"{prefix}_selected_direction", None)
 if update_tree is not None:
     updated_trees = dict(trees)
     if update_tree != 2 or not tree2_has_baseline:
@@ -139,8 +162,13 @@ if previous_pair != current_pair or refresh_drafts:
     latest_trees = storage.load_trees()
     latest_measurements = storage.load_measurements(latest_trees)
     latest_coords, _ = solver.run_network_adjustment(latest_trees, latest_measurements)
-    st.session_state[f"{prefix}_distance_ab"] = _distance_suggestion(latest_trees, latest_measurements, latest_coords, tree_a, tree_b)
-    st.session_state[f"{prefix}_distance_ba"] = _distance_suggestion(latest_trees, latest_measurements, latest_coords, tree_b, tree_a)
+    if {tree_a, tree_b} == {1, 2}:
+        baseline = [distance for a, b, distance in latest_measurements if {a, b} == {1, 2}]
+        baseline_default = int(round(sum(baseline) / len(baseline))) if baseline else None
+    else:
+        baseline_default = None
+    st.session_state[f"{prefix}_distance_ab"] = baseline_default or _distance_suggestion(latest_trees, latest_measurements, latest_coords, tree_a, tree_b)
+    st.session_state[f"{prefix}_distance_ba"] = baseline_default or _distance_suggestion(latest_trees, latest_measurements, latest_coords, tree_b, tree_a)
     st.session_state[last_pair_key] = current_pair
 
 st.subheader("Measurements for this pair")
@@ -158,16 +186,30 @@ for column, label, a, b, distance_key in (
             distance = int(st.number_input("Meas", min_value=1, step=1, key=distance_key))
             save_col, delete_col = st.columns(2)
             with save_col:
-                save = st.button("Update measurement" if saved else "Add measurement", key=f"{prefix}_save_{a}_{b}", type="primary" if saved else "secondary", width="stretch")
+                save = st.button("Update measurement" if saved else "Add measurement", key=f"{prefix}_save_{a}_{b}", type="secondary" if saved else "primary", width="stretch")
             with delete_col:
                 delete = st.button("Delete measurement", key=f"{prefix}_delete_{a}_{b}", disabled=not saved, width="stretch")
             if save:
                 changed = [(from_id, to_id, value) for from_id, to_id, value in measurements if (from_id, to_id) != (a, b)]
-                changed.append((a, b, distance))
+                if {a, b} == {1, 2}:
+                    changed = [(from_id, to_id, value) for from_id, to_id, value in changed if {from_id, to_id} != {1, 2}]
+                    changed.extend(((1, 2, distance), (2, 1, distance)))
+                else:
+                    changed.append((a, b, distance))
                 storage.save_measurements(changed)
+                if {a, b} == {1, 2}:
+                    storage.sync_anchor_baseline(dataset_pk)
+                    st.session_state[refresh_draft_key] = True
+                st.session_state[f"{prefix}_table_revision"] = st.session_state.get(f"{prefix}_table_revision", 0) + 1
                 st.rerun()
             if delete:
-                storage.save_measurements([(from_id, to_id, value) for from_id, to_id, value in measurements if (from_id, to_id) != (a, b)])
+                deleted = [(from_id, to_id, value) for from_id, to_id, value in measurements if (from_id, to_id) != (a, b)]
+                if {a, b} == {1, 2}:
+                    deleted = [(from_id, to_id, value) for from_id, to_id, value in deleted if {from_id, to_id} != {1, 2}]
+                storage.save_measurements(deleted)
+                if {a, b} == {1, 2}:
+                    st.session_state[refresh_draft_key] = True
+                st.session_state[f"{prefix}_table_revision"] = st.session_state.get(f"{prefix}_table_revision", 0) + 1
                 st.rerun()
 
 st.subheader("Measurement records")
@@ -191,14 +233,50 @@ if rows:
     for tree, shift in moved_trees:
         st.warning(f"Tree {tree} moved {shift:.0f} mm from its saved starting estimate.")
 
-    def highlight_large_residual(row):
-        delta = row["Δ"]
-        if pd.notna(delta) and abs(delta) > distance_tolerance:
-            return ["background-color: #fee2e2"] * len(row)
-        return [""] * len(row)
+    pair_to_show_first = tuple(sorted(current_pair))
+    indexed_measurements = list(enumerate(measurements))
+    indexed_measurements.sort(
+        key=lambda item: (
+            tuple(sorted(item[1][:2])) != pair_to_show_first,
+            min(item[1][0], item[1][1]),
+            max(item[1][0], item[1][1]),
+            0 if item[1][0] < item[1][1] else 1,
+            item[0],
+        )
+    )
+    display_rows_data = []
+    display_metadata = []
+    for record_id, (a, b, measured) in indexed_measurements:
+        adjusted = math.dist(coords[a], coords[b]) if a in coords and b in coords else None
+        delta = int(round(adjusted - measured)) if solver_info and solver_info.get("success") and adjusted is not None else None
+        display_rows_data.append({
+            "#": record_id + 1,
+            "Pair": f"{min(a, b)} ↔ {max(a, b)}",
+            "From": a,
+            "To": b,
+            "Meas": int(round(measured)),
+            "Adj": None if delta is None else int(round(adjusted)),
+            "Δ": delta,
+        })
+        display_metadata.append({"pair": tuple(sorted((a, b))), "direction": (a, b), "delta": delta})
 
-    display_rows = pd.DataFrame(rows).style.apply(highlight_large_residual, axis=1)
-    table_key = f"{prefix}_measurement_table"
+    selected_direction = st.session_state.get(f"{prefix}_selected_direction")
+
+    def highlight_large_residual(row):
+        metadata = display_metadata[row.name]
+        if metadata["delta"] is not None and abs(metadata["delta"]) > distance_tolerance:
+            color = "#fee2e2"
+        elif metadata["direction"] == selected_direction:
+            color = "#fed7aa"
+        elif metadata["pair"] == pair_to_show_first:
+            color = "#fff7ed"
+        else:
+            color = ""
+        return [f"background-color: {color}" if color else ""] * len(row)
+
+    display_rows = pd.DataFrame(display_rows_data).style.apply(highlight_large_residual, axis=1)
+    table_revision = st.session_state.get(f"{prefix}_table_revision", 0)
+    table_key = f"{prefix}_measurement_table_{tree_a}_{tree_b}_{table_revision}"
     table_event = st.dataframe(
         display_rows,
         key=table_key,
@@ -210,10 +288,15 @@ if rows:
     selected_rows = table_event.selection.rows
     if selected_rows:
         selected_index = int(selected_rows[0])
-        selected = measurements[selected_index]
-        selected_pair = (selected[0], selected[1])
+        selected = indexed_measurements[selected_index][1]
+        selected_pair = tuple(sorted(selected[:2]))
+        selection_changed = selected_direction != selected[:2]
+        if selection_changed:
+            st.session_state[f"{prefix}_selected_direction"] = selected[:2]
         if selected_pair != (tree_a, tree_b):
             st.session_state[f"{prefix}_pending_pair"] = selected_pair
+            st.rerun()
+        elif selection_changed:
             st.rerun()
 else:
     st.caption("No tape measurements recorded yet.")

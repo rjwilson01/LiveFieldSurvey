@@ -468,11 +468,42 @@ def save_measurements(measurements):
                     "WHERE survey_measurements.distance_mm IS DISTINCT FROM EXCLUDED.distance_mm",
                     [(dataset_id, a, b, distance) for (a, b), distance in changed.items()],
                 )
-        ordered = [(a, b, d) for a, b, d in snapshot["measurements"] if (a, b) in directed]
+        # Keep the in-session snapshot aligned with values just written. If a
+        # row was updated, retaining its prior tuple here made reruns display
+        # stale measurements until the page performed a fresh database read.
+        ordered = [(a, b, directed[(a, b)]) for a, b, _ in snapshot["measurements"] if (a, b) in directed]
         known = {(a, b) for a, b, _ in ordered}
         ordered.extend((a, b, d) for (a, b), d in directed.items() if (a, b) not in known)
         snapshot["measurements"] = ordered
         snapshot["loaded_at"] = time.monotonic()
+
+
+def sync_anchor_baseline(dataset_pk=None):
+    """Keep the two directed anchor readings and Tree 2's baseline position aligned.
+
+    A recorded 1↔2 distance defines Tree 2's adjusted distance from the origin;
+    its prior starting magnitude is ignored. The starting coordinate only
+    determines whether the positive X or Y axis is used.
+    """
+    snapshot = _dataset_snapshot(dataset_pk)
+    baseline = [distance for a, b, distance in snapshot["measurements"] if {a, b} == {1, 2}]
+    if not baseline:
+        return load_dataset_state(dataset_pk)
+
+    distance = max(1, int(round(sum(baseline) / len(baseline))))
+    synced = [
+        (a, b, value)
+        for a, b, value in snapshot["measurements"]
+        if {a, b} != {1, 2}
+    ]
+    synced.extend(((1, 2, distance), (2, 1, distance)))
+    save_measurements(synced)
+
+    trees = dict(snapshot["trees"])
+    tree2_x, tree2_y = trees.get(2, (0, 1))
+    trees[2] = (distance, 0) if abs(tree2_x) > abs(tree2_y) else (0, distance)
+    save_trees(trees)
+    return load_dataset_state(dataset_pk)
 
 
 def append_measurement(a, b, distance_mm):

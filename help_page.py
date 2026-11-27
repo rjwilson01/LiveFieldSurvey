@@ -125,7 +125,7 @@ with st.expander("Set the map reference", expanded=True):
     st.markdown("""
     - Tree 1 is fixed at **(0, 0)**.
     - Tree 2 lies on either the positive **X axis** or positive **Y axis**, selected above. The other coordinate stays at zero.
-    - The Tree 1 ↔ Tree 2 baseline is a regular measurement. If you save Tree 2 with a nonzero starting coordinate before adding a baseline reading, the app creates a 1 → 2 measurement from that distance. Later baseline edits set Tree 2's coordinate to the measured distance on its selected axis.
+    - The Tree 1 ↔ Tree 2 baseline is the measured anchor distance, not an estimate. The app keeps 1 → 2, 2 → 1, and Tree 2's saved anchor distance synchronized; its selected positive axis still determines orientation.
     - The map keeps a small negative margin so the origin markers and axis remain visible.
     - Gray lines show recorded measurements. Amber means the distance network still allows that tree's position to move; it does not simply count links. Green means the local distance geometry fixes that tree relative to the anchored network.
     """)
@@ -162,6 +162,7 @@ with st.expander("Map legend and calculated locations"):
       <div><span style="color:#15803d;font-size:1.2rem;">●</span> <b>Green trees</b> — local distance geometry fixes the position relative to the anchors</div>
       <div><span style="color:#f59e0b;font-size:1.2rem;">●</span> <b>Amber trees</b> — the distance network still allows the position to move</div>
       <div><span style="color:#9aa4b2;font-size:1.2rem;">━</span> <b>Gray lines</b> — recorded measurements</div>
+      <div><span style="color:#64748b;font-size:1.2rem;">➤</span> <b>Arrow marks</b> — a measurement exists in that direction; the 1 ↔ 2 baseline has no arrow</div>
       <div><span style="color:#f97316;font-size:1.2rem;">━</span> <b>Orange line</b> — selected tree pair</div>
       <div><span style="color:#94a3b8;font-size:1.2rem;">●</span> <b>Faint dots</b> — starting-estimate placement targets</div>
       <div><span style="color:#64748b;font-size:1.2rem;">◯</span> <b>Open circles</b> — saved initial estimates, when shown</div>

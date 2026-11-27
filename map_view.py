@@ -1,5 +1,6 @@
 """Shared map projection and Plotly figure for survey pages."""
 
+import math
 import numpy as np
 import plotly.graph_objects as go
 
@@ -96,6 +97,33 @@ def build_survey_map(
                 hovertemplate=f"{a} → {b}: {distance:.0f} mm<extra></extra>",
                 showlegend=False,
             ))
+            # Direction markers show which tape records exist. The 1↔2
+            # baseline is a shared anchor distance, so it intentionally has
+            # no directional arrow.
+            if {a, b} != {1, 2}:
+                dx, dy = xb - xa, yb - ya
+                length = math.hypot(dx, dy)
+                if length > 1e-9:
+                    side = 1 if a < b else -1
+                    offset = max(20.0, max(max_x, max_y) * 0.008) * side
+                    normal_x, normal_y = -dy / length * offset, dx / length * offset
+                    tail_fraction, head_fraction = 0.48, 0.64
+                    fig.add_annotation(
+                        x=xa + dx * head_fraction + normal_x,
+                        y=ya + dy * head_fraction + normal_y,
+                        ax=xa + dx * tail_fraction + normal_x,
+                        ay=ya + dy * tail_fraction + normal_y,
+                        xref="x",
+                        yref="y",
+                        axref="x",
+                        ayref="y",
+                        text="",
+                        showarrow=True,
+                        arrowhead=2,
+                        arrowsize=1.0,
+                        arrowwidth=2,
+                        arrowcolor=color,
+                    )
 
         estimate_points = [
             survey_to_map(*trees[tree], axis_layout, mirror_x, mirror_y)

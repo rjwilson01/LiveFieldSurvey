@@ -44,8 +44,13 @@ def persist_trees():
 
 def persist_measurements():
     storage.save_measurements(measurements)
-    # The solver constrains Tree 2 to the mean baseline on its selected axis.
-    sync_tree2_to_baseline()
+    # The anchor baseline is mirrored in both directions and sets Tree 2's
+    # stored distance on its already selected positive axis.
+    storage.sync_anchor_baseline()
+    synced_state = storage.load_dataset_state()
+    measurements[:] = synced_state["measurements"]
+    trees.clear()
+    trees.update(synced_state["trees"])
 
 dataset_info = storage.load_dataset_info()
 coords, solver_info = solver.run_network_adjustment(trees, measurements)
@@ -342,15 +347,33 @@ with st.sidebar:
                         st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
                         st.rerun()
                     else:
-                        measurements.append((int(from_tree), int(to_tree), float(distance)))
+                        if {int(from_tree), int(to_tree)} == {1, 2}:
+                            measurements[:] = [record for record in measurements if {record[0], record[1]} != {1, 2}]
+                            measurements.extend(((1, 2, float(distance)), (2, 1, float(distance))))
+                        else:
+                            measurements.append((int(from_tree), int(to_tree), float(distance)))
                         persist_measurements()
+                        if {int(from_tree), int(to_tree)} == {1, 2}:
+                            st.session_state["selected_measurement_index"] = next(
+                                index for index, record in enumerate(measurements)
+                                if record[:2] == (int(from_tree), int(to_tree))
+                            )
                 elif 0 <= selected_measurement_index < len(measurements):
                     duplicate = any(index != selected_measurement_index and a == int(from_tree) and b == int(to_tree) for index, (a, b, _) in enumerate(measurements))
                     if duplicate:
                         st.error(f"Tree {from_tree} → Tree {to_tree} already has a measurement. Choose another direction or pair.")
                     else:
-                        measurements[selected_measurement_index] = (int(from_tree), int(to_tree), float(distance))
+                        if {int(from_tree), int(to_tree)} == {1, 2}:
+                            measurements[:] = [record for record in measurements if {record[0], record[1]} != {1, 2}]
+                            measurements.extend(((1, 2, float(distance)), (2, 1, float(distance))))
+                        else:
+                            measurements[selected_measurement_index] = (int(from_tree), int(to_tree), float(distance))
                         persist_measurements()
+                        if {int(from_tree), int(to_tree)} == {1, 2}:
+                            st.session_state["selected_measurement_index"] = next(
+                                index for index, record in enumerate(measurements)
+                                if record[:2] == (int(from_tree), int(to_tree))
+                            )
                 if not duplicate:
                     st.session_state["measurement_editor_values"] = {"from": int(from_tree), "to": int(to_tree), "distance": int(distance)}
                     st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
@@ -363,7 +386,11 @@ with st.sidebar:
             st.rerun()
         if delete_measurement:
             if selected_measurement_index is not None and 0 <= selected_measurement_index < len(measurements):
-                measurements.pop(selected_measurement_index)
+                selected_pair = set(measurements[selected_measurement_index][:2])
+                if selected_pair == {1, 2}:
+                    measurements[:] = [record for record in measurements if {record[0], record[1]} != {1, 2}]
+                else:
+                    measurements.pop(selected_measurement_index)
                 persist_measurements()
                 st.session_state["selected_measurement_index"] = None
                 st.session_state["measurement_table_revision"] = st.session_state.get("measurement_table_revision", 0) + 1
@@ -619,6 +646,7 @@ if measurements:
         pair_changed = False
 
     measurements_changed = False
+    edited_baseline_distance = None
     for row_num, edited_row in edited_table.iterrows():
         record_id = int(table_df.iloc[row_num]["_record_id"])
         if pd.isna(edited_row["Meas"]):
@@ -626,8 +654,14 @@ if measurements:
         edited_distance = int(round(float(edited_row["Meas"])))
         a, b, old_distance = measurements[record_id]
         if edited_distance > 0 and edited_distance != int(round(old_distance)):
-            measurements[record_id] = (a, b, float(edited_distance))
+            if {a, b} == {1, 2}:
+                edited_baseline_distance = edited_distance
+            else:
+                measurements[record_id] = (a, b, float(edited_distance))
             measurements_changed = True
+    if edited_baseline_distance is not None:
+        measurements[:] = [record for record in measurements if {record[0], record[1]} != {1, 2}]
+        measurements.extend(((1, 2, float(edited_baseline_distance)), (2, 1, float(edited_baseline_distance))))
     if measurements_changed:
         persist_measurements()
         st.session_state["measurement_table_revision"] = table_revision + 1

@@ -130,6 +130,7 @@ if not tablet_page:
             on_change=navigate_to_selected_page,
         )
 
+storage.sync_anchor_baseline(st.session_state["active_dataset_pk"])
 active_dataset = storage.load_dataset_info(st.session_state["active_dataset_pk"])
 st.session_state["map_axis_layout"] = active_dataset.get("map_axis_layout", storage.DEFAULT_MAP_ORIENTATION["map_axis_layout"])
 st.session_state["mirror_map_x"] = bool(active_dataset.get("mirror_map_x", False))
