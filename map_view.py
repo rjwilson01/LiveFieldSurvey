@@ -1,5 +1,3 @@
-"""Shared map projection and Plotly figure for survey pages."""
-
 import math
 import numpy as np
 import plotly.graph_objects as go
@@ -15,7 +13,9 @@ def survey_to_map(x, y, axis_layout, mirror_x, mirror_y):
 def map_to_survey(map_x, map_y, axis_layout, mirror_x, mirror_y):
     swap_axes = axis_layout == "Y horizontal, X vertical"
     signed_x, signed_y = (map_y, map_x) if swap_axes else (map_x, map_y)
-    return (-signed_x if mirror_x else signed_x, -signed_y if mirror_y else signed_y)
+    x = -signed_x if mirror_x else signed_x
+    y = -signed_y if mirror_y else signed_y
+    return (x, y)
 
 
 def build_survey_map(
@@ -67,80 +67,104 @@ def build_survey_map(
                 map_to_survey(x, y, axis_layout, mirror_x, mirror_y)
                 for x, y in grid_points
             ]
-            fig.add_trace(go.Scatter(
-                x=[point[0] for point in grid_points],
-                y=[point[1] for point in grid_points],
-                customdata=tap_points,
-                mode="markers",
-                marker={"size": 18, "color": "rgba(100,116,139,0.20)"},
-                hovertemplate="Tap to set starting estimate<br>Survey X %{customdata[0]:.0f} mm<br>Survey Y %{customdata[1]:.0f} mm<extra></extra>",
-                showlegend=False,
-                visible=show_starting_targets,
-                name="Starting estimate targets",
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=[point[0] for point in grid_points],
+                    y=[point[1] for point in grid_points],
+                    customdata=tap_points,
+                    mode="markers",
+                    marker={"size": 18, "color": "rgba(100,116,139,0.20)"},
+                    hovertemplate=(
+                        "Tap to set starting estimate<br>Survey X"
+                        " %{customdata[0]:.0f} mm<br>Survey Y"
+                        " %{customdata[1]:.0f} mm<extra></extra>"
+                    ),
+                    showlegend=False,
+                    visible=show_starting_targets,
+                    name="Starting estimate targets",
+                )
+            )
+
+        # Track seen undirected pairs so reciprocal shots (a->b and b->a) separate cleanly
+        seen_pairs = set()
 
         for record_index, (a, b, distance) in enumerate(measurements):
             if a not in coords or b not in coords:
                 continue
             xa, ya = survey_to_map(*coords[a], axis_layout, mirror_x, mirror_y)
             xb, yb = survey_to_map(*coords[b], axis_layout, mirror_x, mirror_y)
-            midpoint_x, midpoint_y = (xa + xb) / 2, (ya + yb) / 2
-            is_highlighted = highlight_pair == tuple(sorted((a, b)))
+
+            pair_key = tuple(sorted((a, b)))
+            is_duplicate_dir = pair_key in seen_pairs
+            seen_pairs.add(pair_key)
+
+            is_highlighted = highlight_pair == pair_key
             color = "#f97316" if is_highlighted else "#9aa4b2"
-            fig.add_trace(go.Scatter(
-                x=[xa, midpoint_x, xb],
-                y=[ya, midpoint_y, yb],
-                mode="lines+markers",
-                line={"color": color, "width": 3 if is_highlighted else 2},
-                marker={"size": [1, 18, 1], "color": [color, "rgba(100,116,139,0.015)", color]},
-                customdata=[[record_index, a, b]] * 3,
-                hovertemplate=f"{a} → {b}: {distance:.0f} mm<extra></extra>",
-                showlegend=False,
-            ))
-            # Direction markers show which tape records exist. The 1↔2
-            # baseline is a shared anchor distance, so it intentionally has
-            # no directional arrow.
-            if {a, b} != {1, 2}:
-                dx, dy = xb - xa, yb - ya
-                length = math.hypot(dx, dy)
-                if length > 1e-9:
-                    side = 1 if a < b else -1
-                    offset = max(20.0, max(max_x, max_y) * 0.008) * side
-                    normal_x, normal_y = -dy / length * offset, dx / length * offset
-                    tail_fraction, head_fraction = 0.48, 0.64
-                    fig.add_annotation(
-                        x=xa + dx * head_fraction + normal_x,
-                        y=ya + dy * head_fraction + normal_y,
-                        ax=xa + dx * tail_fraction + normal_x,
-                        ay=ya + dy * tail_fraction + normal_y,
-                        xref="x",
-                        yref="y",
-                        axref="x",
-                        ayref="y",
-                        text="",
-                        showarrow=True,
-                        arrowhead=2,
-                        arrowsize=1.0,
-                        arrowwidth=2,
-                        arrowcolor=color,
-                    )
+            has_arrow = {a, b} != {1, 2}
+
+            # Place the arrow marker at 58% along the segment (or 68% if a reciprocal
+            # measurement already sits at 58%) so arrowheads never collide.
+            t = 0.68 if is_duplicate_dir else 0.58
+            arrow_x = xa + (xb - xa) * t
+            arrow_y = ya + (yb - ya) * t
+
+            # Using [start, arrow_pos, end] with angleref="previous" automatically
+            # points the middle arrow marker from (xa, ya) -> (arrow_x, arrow_y)
+            fig.add_trace(
+                go.Scatter(
+                    x=[xa, arrow_x, xb],
+                    y=[ya, arrow_y, yb],
+                    mode="lines+markers",
+                    line={"color": color, "width": 3 if is_highlighted else 2},
+                    marker={
+                        "symbol": [
+                            "circle",
+                            "arrow" if has_arrow else "circle",
+                            "circle",
+                        ],
+                        "size": [1, 13 if has_arrow else 18, 1],
+                        "angleref": "previous",
+                        "color": [
+                            color,
+                            color if has_arrow else "rgba(100,116,139,0.015)",
+                            color,
+                        ],
+                    },
+                    customdata=[[record_index, a, b]] * 3,
+                    hovertemplate=(
+                        f"{a} → {b}: {distance:.0f} mm<extra></extra>"
+                    ),
+                    showlegend=False,
+                )
+            )
 
         estimate_points = [
             survey_to_map(*trees[tree], axis_layout, mirror_x, mirror_y)
             for tree in sorted(trees)
         ]
-        fig.add_trace(go.Scatter(
-            x=[point[0] for point in estimate_points],
-            y=[point[1] for point in estimate_points],
-            customdata=[trees[tree] for tree in sorted(trees)],
-            mode="markers",
-            name="Initial estimates",
-            visible=show_initial_estimates,
-            showlegend=False,
-            marker={"symbol": "circle-open", "size": 12, "color": "#64748b", "line": {"width": 2}},
-            text=[str(tree) for tree in sorted(trees)],
-            hovertemplate="Initial estimate · Tree %{text}<br>Survey X %{customdata[0]:.0f} mm<br>Survey Y %{customdata[1]:.0f} mm<extra></extra>",
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=[point[0] for point in estimate_points],
+                y=[point[1] for point in estimate_points],
+                customdata=[trees[tree] for tree in sorted(trees)],
+                mode="markers",
+                name="Initial estimates",
+                visible=show_initial_estimates,
+                showlegend=False,
+                marker={
+                    "symbol": "circle-open",
+                    "size": 12,
+                    "color": "#64748b",
+                    "line": {"width": 2},
+                },
+                text=[str(tree) for tree in sorted(trees)],
+                hovertemplate=(
+                    "Initial estimate · Tree %{text}<br>Survey X"
+                    " %{customdata[0]:.0f} mm<br>Survey Y %{customdata[1]:.0f}"
+                    " mm<extra></extra>"
+                ),
+            )
+        )
 
         neighbors = {tree: set() for tree in trees}
         for a, b, _ in measurements:
@@ -148,25 +172,46 @@ def build_survey_map(
                 neighbors[a].add(b)
                 neighbors[b].add(a)
         colors = [
-            "#2563eb" if tree in (1, 2) else ("#f59e0b" if tree in underconstrained else "#15803d")
+            "#2563eb"
+            if tree in (1, 2)
+            else ("#f59e0b" if tree in underconstrained else "#15803d")
             for tree in sorted(trees)
         ]
         adjusted_points = [
             survey_to_map(*coords[tree], axis_layout, mirror_x, mirror_y)
             for tree in sorted(trees)
         ]
-        fig.add_trace(go.Scatter(
-            x=[point[0] for point in adjusted_points],
-            y=[point[1] for point in adjusted_points],
-            mode="markers+text",
-            name="Adjusted positions",
-            showlegend=False,
-            text=[str(tree) for tree in sorted(trees)],
-            textposition="top center",
-            marker={"size": 15, "color": colors, "line": {"color": "white", "width": 1}},
-            customdata=[[len(neighbors[tree]), tree in underconstrained, tree, coords[tree][0], coords[tree][1]] for tree in sorted(trees)],
-            hovertemplate="Tree %{text}<br>Survey X %{customdata[3]:.0f} mm<br>Survey Y %{customdata[4]:.0f} mm<br>Distinct links: %{customdata[0]}<extra></extra>",
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=[point[0] for point in adjusted_points],
+                y=[point[1] for point in adjusted_points],
+                mode="markers+text",
+                name="Adjusted positions",
+                showlegend=False,
+                text=[str(tree) for tree in sorted(trees)],
+                textposition="top center",
+                marker={
+                    "size": 15,
+                    "color": colors,
+                    "line": {"color": "white", "width": 1},
+                },
+                customdata=[
+                    [
+                        len(neighbors[tree]),
+                        tree in underconstrained,
+                        tree,
+                        coords[tree][0],
+                        coords[tree][1],
+                    ]
+                    for tree in sorted(trees)
+                ],
+                hovertemplate=(
+                    "Tree %{text}<br>Survey X %{customdata[3]:.0f} mm<br>Survey"
+                    " Y %{customdata[4]:.0f} mm<br>Distinct links:"
+                    " %{customdata[0]}<extra></extra>"
+                ),
+            )
+        )
     else:
         max_x = max_y = 1000
         x_padding = y_padding = 100
@@ -176,8 +221,22 @@ def build_survey_map(
     fig.update_layout(
         height=620,
         margin={"l": 10, "r": 10, "t": 20, "b": 10},
-        xaxis={"title": f"{horizontal_axis_name} (mm)", "range": x_range, "zeroline": True, "scaleanchor": "y", "scaleratio": 1, "constrain": "domain", "constraintoward": "left"},
-        yaxis={"title": f"{vertical_axis_name} (mm)", "range": y_range, "zeroline": True, "constrain": "domain", "constraintoward": "bottom"},
+        xaxis={
+            "title": f"{horizontal_axis_name} (mm)",
+            "range": x_range,
+            "zeroline": True,
+            "scaleanchor": "y",
+            "scaleratio": 1,
+            "constrain": "domain",
+            "constraintoward": "left",
+        },
+        yaxis={
+            "title": f"{vertical_axis_name} (mm)",
+            "range": y_range,
+            "zeroline": True,
+            "constrain": "domain",
+            "constraintoward": "bottom",
+        },
         showlegend=False,
         autosize=True,
         uirevision=f"survey-map-{swap_axes}-{mirror_x}-{mirror_y}",
