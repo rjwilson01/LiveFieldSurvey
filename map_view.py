@@ -96,7 +96,7 @@ def build_survey_map(
 
             pair_key = tuple(sorted((a, b)))
             is_highlighted = highlight_pair == pair_key
-            color = "#f97316" if is_highlighted else "#9aa4b2"
+            color = "#f97316" if is_highlighted else "#191c1f"
             has_arrow = {a, b} != {1, 2}
 
             dx, dy = xb - xa, yb - ya
@@ -161,7 +161,7 @@ def build_survey_map(
                 showlegend=False,
                 marker={
                     "symbol": "circle-open",
-                    "size": 12,
+                    "size": 13,
                     "color": "#64748b",
                     "line": {"width": 2},
                 },
