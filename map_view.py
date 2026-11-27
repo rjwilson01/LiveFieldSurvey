@@ -161,7 +161,7 @@ def build_survey_map(
                 showlegend=False,
                 marker={
                     "symbol": "circle-open",
-                    "size": 13,
+                    "size": 15,
                     "color": "#64748b",
                     "line": {"width": 2},
                 },
