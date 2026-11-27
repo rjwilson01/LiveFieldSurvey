@@ -3,6 +3,7 @@
 from pathlib import Path
 import os
 import time
+from urllib.parse import quote, urlencode
 
 import streamlit as st
 import psycopg
@@ -36,18 +37,86 @@ def _configured_value(name):
 
 
 def _database_url():
+    urls = _split_database_urls()
+    if urls:
+        return urls[0]
     value = _configured_value("DATABASE_URL")
     if not value:
         raise StorageConfigurationError(
-            "Neon PostgreSQL is not configured. Add DATABASE_URL to .env.local "
-            "or Streamlit Secrets."
+            "Neon PostgreSQL is not configured. Add a [database] block with user, "
+            "password, host, name, and port, or provide DATABASE_URL."
         )
     return value
 
 
+def _database_setting(section_key, env_key):
+    try:
+        section = st.secrets.get("database", {})
+        value = section.get(section_key) if hasattr(section, "get") else None
+    except Exception:
+        value = None
+    if value not in (None, ""):
+        return str(value).strip()
+    return os.getenv(env_key, "").strip()
+
+
+def _split_database_urls():
+    """Build pooled and direct Neon URLs from one shared credential set."""
+    settings = {
+        "user": _database_setting("user", "DB_USER"),
+        "password": _database_setting("password", "DB_PASSWORD"),
+        "host": _database_setting("host", "DB_HOST"),
+        "name": _database_setting("name", "DB_NAME"),
+        "port": _database_setting("port", "DB_PORT") or "5432",
+    }
+    if not any(settings[key] for key in ("user", "password", "host", "name")):
+        return None
+
+    required = ("user", "password", "host", "name")
+    missing = [key for key in required if not settings[key]]
+    if missing:
+        raise StorageConfigurationError(
+            "The split database settings are incomplete. Set database.user, "
+            "database.password, database.host, and database.name (plus database.port if needed)."
+        )
+
+    host = settings["host"].strip().rstrip("/")
+    if "://" in host or "/" in host or "." not in host:
+        raise StorageConfigurationError(
+            "database.host / DB_HOST must be the bare Neon endpoint hostname, without a URL, port, or path."
+        )
+    host_prefix, host_suffix = host.split(".", 1)
+    if host_prefix.endswith("-pooler"):
+        host_prefix = host_prefix[:-7]
+        host = f"{host_prefix}.{host_suffix}"
+    pooled_host = f"{host_prefix}-pooler.{host_suffix}"
+
+    try:
+        port = int(settings["port"])
+        if not 1 <= port <= 65535:
+            raise ValueError
+    except ValueError as exc:
+        raise StorageConfigurationError("database.port / DB_PORT must be a valid TCP port number.") from exc
+
+    user = quote(settings["user"], safe="")
+    password = quote(settings["password"], safe="")
+    database = quote(settings["name"], safe="")
+    query = urlencode({"sslmode": "require", "channel_binding": "require"})
+
+    def make_url(endpoint):
+        return f"postgresql://{user}:{password}@{endpoint}:{port}/{database}?{query}"
+
+    return make_url(pooled_host), make_url(host)
+
+
 def _run_migrations():
     app_url = _database_url()
-    migration_url = _configured_value("DATABASE_URL_UNPOOLED") or app_url
+    split_urls = _split_database_urls()
+    migration_url = (
+        split_urls[1]
+        if split_urls
+        else (_configured_value("DATABASE_URL_UNPOOLED") or app_url)
+    )
     migration_path = Path(__file__).with_name("migrations") / "001_initial.sql"
     if not migration_path.exists():
         raise StorageConfigurationError(f"Database migration file is missing: {migration_path.name}")
