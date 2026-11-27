@@ -4,14 +4,17 @@ import numpy as np
 from scipy.optimize import least_squares
 
 
-def run_network_adjustment(trees_dict, measurements):
-    """Return adjusted coordinates (mm), starting guesses, and solver metadata.
+from itertools import combinations
+import numpy as np
+from scipy.optimize import least_squares
 
-    Tree 1 defines the origin. Tree 2 defines either the positive X or positive
-    Y axis, based on its starting estimate, with its position set by their
-    measured baseline when one is recorded. Remaining
-    estimates are retained as the solver's starting point and constrained to
-    the positive quadrant to keep the chosen orientation stable.
+
+def run_network_adjustment(trees_dict, measurements, anchor_weight=1e-3):
+    """Return adjusted coordinates (mm), solver metadata, and geometry warnings.
+
+    anchor_weight=1e-3 corresponds to a 1000 mm map-click prior vs 1 mm tape
+    weight (1,000,000 : 1 squared error ratio). Keeps unconstrained chains from
+    wildly drifting without biasing constrained triangles.
     """
     ids = sorted(trees_dict)
     if 1 not in trees_dict or 2 not in trees_dict or len(ids) < 2:
@@ -24,6 +27,7 @@ def run_network_adjustment(trees_dict, measurements):
     anchor_distance = max(anchor_distance, 1e-6)
     anchor_position = np.zeros(2, dtype=float)
     anchor_position[anchor_axis] = anchor_distance
+
     free_ids = [t for t in ids if t not in (1, 2)]
     initial = np.concatenate([np.maximum(guesses[t], 0.0) for t in free_ids]) if free_ids else np.array([])
     index = {tree: i for i, tree in enumerate(free_ids)}
@@ -37,13 +41,25 @@ def run_network_adjustment(trees_dict, measurements):
 
     def residuals(values):
         result = []
+        # 1. Primary distance residuals (weight = 1.0)
         for a, b, measured_mm in measurements:
             if a in trees_dict and b in trees_dict:
                 result.append(np.linalg.norm(xy(a, values) - xy(b, values)) - measured_mm)
+        # 2. Weak map-click anchors so unconstrained traverse chains stay near clicks
+        if free_ids and anchor_weight > 0:
+            result.extend((values - initial) * anchor_weight)
         return np.asarray(result, dtype=float)
 
     if measurements and free_ids:
-        fit = least_squares(residuals, initial, bounds=(0.0, np.inf), method="trf", ftol=1e-10, xtol=1e-10, gtol=1e-10)
+        fit = least_squares(
+            residuals,
+            initial,
+            bounds=(0.0, np.inf),
+            method="trf",
+            ftol=1e-10,
+            xtol=1e-10,
+            gtol=1e-10,
+        )
         values = fit.x
         success = bool(fit.success)
         message = fit.message
@@ -54,7 +70,73 @@ def run_network_adjustment(trees_dict, measurements):
 
     coords = {1: (0.0, 0.0), 2: tuple(map(float, anchor_position))}
     coords.update({t: tuple(map(float, xy(t, values))) for t in free_ids})
-    return coords, {"success": success, "message": str(message), "baseline_measured": bool(baseline)}
+
+    # Run geometry diagnostics
+    unfixed = underconstrained_tree_ids(trees_dict, measurements, coords)
+    warnings = diagnose_geometry(guesses, coords, measurements, unfixed)
+
+    return coords, {
+        "success": success,
+        "message": str(message),
+        "baseline_measured": bool(baseline),
+        "unfixed_ids": unfixed,
+        "warnings": warnings,
+    }
+
+def diagnose_geometry(guesses, coords, measurements, unfixed_ids, min_area_mm2=5000.0):
+    """Detect fold-over local minima and gross initial-estimate errors on fixed nodes."""
+    warnings = []
+
+    # Build adjacency from measured edges
+    adj = {t: set() for t in coords}
+    for a, b, _ in measurements:
+        if a in adj and b in adj and a != b:
+            adj[a].add(b)
+            adj[b].add(a)
+
+    # 1. Triangle Chirality Flip (catches Node 10 folding onto Node 11)
+    triangles = set()
+    for u in adj:
+        for v, w in combinations(adj[u], 2):
+            if w in adj[v]:
+                triangles.add(tuple(sorted((u, v, w))))
+
+    for a, b, c in sorted(triangles):
+        g_a, g_b, g_c = guesses[a], guesses[b], guesses[c]
+        s_a, s_b, s_c = np.asarray(coords[a]), np.asarray(coords[b]), np.asarray(coords[c])
+
+        area2_init = (g_b[0] - g_a[0]) * (g_c[1] - g_a[1]) - (g_b[1] - g_a[1]) * (g_c[0] - g_a[0])
+        area2_solv = (s_b[0] - s_a[0]) * (s_c[1] - s_a[1]) - (s_b[1] - s_a[1]) * (s_c[0] - s_a[0])
+
+        if abs(area2_init) >= 2 * min_area_mm2 and abs(area2_solv) >= 2 * min_area_mm2:
+            if np.sign(area2_init) != np.sign(area2_solv):
+                warnings.append({
+                    "type": "chirality_flip",
+                    "trees": (a, b, c),
+                    "message": f"Triangle {a}-{b}-{c} flipped orientation (possible fold-over).",
+                })
+
+    # 2. Gross Initial Estimate Outlier (only on FIXED nodes, ignoring unbraced traverses)
+    # Compare initial-to-solved shift against the median shift of all fixed nodes
+    fixed_ids = [t for t in coords if t not in unfixed_ids and t not in (1, 2)]
+    if len(fixed_ids) >= 3:
+        shifts = {
+            t: float(np.linalg.norm(np.asarray(coords[t]) - guesses[t]))
+            for t in fixed_ids
+        }
+        median_shift = float(np.median(list(shifts.values())))
+        for t, shift in shifts.items():
+            # Flag only if a fixed node jumped > 500 mm AND > 3x the typical click error
+            if shift > max(500.0, 3.0 * median_shift):
+                warnings.append({
+                    "type": "gross_initial_error",
+                    "trees": (t,),
+                    "shift_mm": round(shift, 1),
+                    "message": f"Tree {t} moved {shift:.0f} mm from initial click (check for mistyped digit).",
+                })
+
+    return warnings
+
 
 
 def underconstrained_tree_ids(trees_dict, measurements, coords):
