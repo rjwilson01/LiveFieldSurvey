@@ -95,25 +95,31 @@ def build_survey_map(
             xb, yb = survey_to_map(*coords[b], axis_layout, mirror_x, mirror_y)
 
             pair_key = tuple(sorted((a, b)))
-            is_duplicate_dir = pair_key in seen_pairs
-            seen_pairs.add(pair_key)
-
             is_highlighted = highlight_pair == pair_key
             color = "#f97316" if is_highlighted else "#9aa4b2"
             has_arrow = {a, b} != {1, 2}
 
-            # Place the arrow marker at 58% along the segment (or 68% if a reciprocal
-            # measurement already sits at 58%) so arrowheads never collide.
-            t = 0.68 if is_duplicate_dir else 0.58
-            arrow_x = xa + (xb - xa) * t
-            arrow_y = ya + (yb - ya) * t
+            dx, dy = xb - xa, yb - ya
+            length = math.hypot(dx, dy)
 
-            # Using [start, arrow_pos, end] with angleref="previous" automatically
-            # points the middle arrow marker from (xa, ya) -> (arrow_x, arrow_y)
+            # Place arrow near the start node (a), outside the node's marker radius,
+            # while capping at 22% of the line so short segments still look balanced.
+            if length > 1e-9:
+                clearance = max(max_x, max_y) * 0.025
+                t = min(0.22, max(0.06, clearance / length))
+            else:
+                t = 0.1
+
+            arrow_x = xa + dx * t
+            arrow_y = ya + dy * t
+            mid_x, mid_y = (xa + xb) / 2, (ya + yb) / 2
+
+            # 4 points: [start, near-start arrow, invisible midpoint tap target, end]
+            # angleref="previous" points the arrow from (xa, ya) -> (arrow_x, arrow_y) (away from a)
             fig.add_trace(
                 go.Scatter(
-                    x=[xa, arrow_x, xb],
-                    y=[ya, arrow_y, yb],
+                    x=[xa, arrow_x, mid_x, xb],
+                    y=[ya, arrow_y, mid_y, yb],
                     mode="lines+markers",
                     line={"color": color, "width": 3 if is_highlighted else 2},
                     marker={
@@ -121,16 +127,18 @@ def build_survey_map(
                             "circle",
                             "arrow" if has_arrow else "circle",
                             "circle",
+                            "circle",
                         ],
-                        "size": [1, 13 if has_arrow else 18, 1],
+                        "size": [1, 13 if has_arrow else 1, 18, 1],
                         "angleref": "previous",
                         "color": [
                             color,
-                            color if has_arrow else "rgba(100,116,139,0.015)",
+                            color if has_arrow else "rgba(0,0,0,0)",
+                            "rgba(100,116,139,0.015)",  # Preserves your center tap/hover target
                             color,
                         ],
                     },
-                    customdata=[[record_index, a, b]] * 3,
+                    customdata=[[record_index, a, b]] * 4,
                     hovertemplate=(
                         f"{a} → {b}: {distance:.0f} mm<extra></extra>"
                     ),
