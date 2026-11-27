@@ -6,14 +6,30 @@ A Streamlit tool for recording tree-to-tree tape measurements and calculating ad
 
 The project is linked to Neon project `curly-cake-12589954`, branch `production`. PostgreSQL is included on every Neon project. `neon.ts` contains the branch policy used by `neon deploy`.
 
-The Neon CLI writes the pooled app connection string (`DATABASE_URL`) and the direct migration connection string (`DATABASE_URL_UNPOOLED`) to `.env.local`. Keep that file private; it is ignored by Git. Local runs load it automatically. In Streamlit Community Cloud, add both values as top-level Secrets:
+The app can use a single set of database credentials and derive the pooled and direct Neon URLs. Set the direct endpoint host (without `-pooler`) once. Streamlit Community Cloud Secrets:
 
 ```toml
-DATABASE_URL = "YOUR_NEON_POOLED_CONNECTION_STRING"
-DATABASE_URL_UNPOOLED = "YOUR_NEON_DIRECT_CONNECTION_STRING"
+[database]
+user = "YOUR_NEON_DATABASE_ROLE"
+password = "YOUR_NEON_ROLE_PASSWORD"
+host = "ep-example.region.aws.neon.tech"
+name = "neondb"
+port = 5432
 ```
 
-Use the pooled URL for normal app connections. Schema migrations prefer the direct URL. The app applies the checked-in SQL migration from `migrations/` once per database schema version.
+The app adds `-pooler` to the endpoint host for normal app connections and uses the direct host for schema migrations. The app applies the checked-in SQL migration from `migrations/` once per database schema version.
+
+For local runs, `.env.local` uses the equivalent flat environment variables:
+
+```dotenv
+DB_USER=YOUR_NEON_DATABASE_ROLE
+DB_PASSWORD=YOUR_NEON_ROLE_PASSWORD
+DB_HOST=ep-example.region.aws.neon.tech
+DB_NAME=neondb
+DB_PORT=5432
+```
+
+`.env.local` is a private local configuration file, not a notes file; it is ignored by Git. Use the same values as Streamlit Secrets if local development should connect to the same Neon branch. You can use different values to keep local testing on another database. Existing `DATABASE_URL` and `DATABASE_URL_UNPOOLED` settings remain supported as a fallback.
 
 ## Sign-in
 
@@ -26,7 +42,7 @@ In Streamlit Secrets, keep your existing `[auth]` OAuth block and set the allowe
 allowed_email = "your-sign-in-account@example.com"
 ```
 
-The old `[google_sheets]` block can be removed. `DATABASE_URL_UNPOOLED` is recommended for schema setup; if omitted, setup falls back to `DATABASE_URL`.
+The old `[google_sheets]` block can be removed.
 
 For Streamlit Community Cloud, keep the OAuth settings in the app's **Secrets**. The OAuth client redirect URI must be the app URL followed by `/oauth2callback`. Never commit OAuth secrets or database URLs to Git.
 
