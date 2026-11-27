@@ -145,19 +145,13 @@ def build_survey_map(
                     showlegend=False,
                 )
             )
-
-        estimate_points = [
-            survey_to_map(*trees[tree], axis_layout, mirror_x, mirror_y)
-            for tree in sorted(trees)
-        ]
-                # Calculate data units (mm) per screen pixel to find exact marker edge radii
-        # Plot area inside height=620 with top/bottom margins (20 + 10) and axis title is ~540px
+# ---> INSERT THE SHIFT CONNECTOR BLOCK RIGHT HERE <---
         plot_height_px = 540.0
-        span_y = (max_y + y_padding)
+        span_y = max_y + y_padding
         mm_per_px = span_y / plot_height_px
 
-        r_initial_mm = (19 / 2.0) * mm_per_px   # Outer radius of size=19 open ring
-        r_final_mm = (16 / 2.0) * mm_per_px     # Outer radius of size=15 + 1px border
+        r_initial_mm = (19 / 2.0) * mm_per_px
+        r_final_mm = (16 / 2.0) * mm_per_px
 
         shift_x, shift_y = [], []
         for tree in sorted(trees):
@@ -169,7 +163,6 @@ def build_survey_map(
             dx, dy = x1 - x0, y1 - y0
             dist = math.hypot(dx, dy)
 
-            # Only draw if the two circles do not overlap (edge-to-edge gap > 0)
             if dist > (r_initial_mm + r_final_mm):
                 ux, uy = dx / dist, dy / dist
                 shift_x.extend([x0 + ux * r_initial_mm, x1 - ux * r_final_mm, None])
@@ -187,7 +180,12 @@ def build_survey_map(
                     hoverinfo="skip",
                 )
             )
-
+        # ---> END OF INSERTED BLOCK <---
+        estimate_points = [
+            survey_to_map(*trees[tree], axis_layout, mirror_x, mirror_y)
+            for tree in sorted(trees)
+        ]
+        
         fig.add_trace(
             go.Scatter(
                 x=[point[0] for point in estimate_points],
