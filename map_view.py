@@ -150,6 +150,44 @@ def build_survey_map(
             survey_to_map(*trees[tree], axis_layout, mirror_x, mirror_y)
             for tree in sorted(trees)
         ]
+                # Calculate data units (mm) per screen pixel to find exact marker edge radii
+        # Plot area inside height=620 with top/bottom margins (20 + 10) and axis title is ~540px
+        plot_height_px = 540.0
+        span_y = (max_y + y_padding)
+        mm_per_px = span_y / plot_height_px
+
+        r_initial_mm = (19 / 2.0) * mm_per_px   # Outer radius of size=19 open ring
+        r_final_mm = (16 / 2.0) * mm_per_px     # Outer radius of size=15 + 1px border
+
+        shift_x, shift_y = [], []
+        for tree in sorted(trees):
+            if tree not in coords:
+                continue
+            x0, y0 = survey_to_map(*trees[tree], axis_layout, mirror_x, mirror_y)
+            x1, y1 = survey_to_map(*coords[tree], axis_layout, mirror_x, mirror_y)
+
+            dx, dy = x1 - x0, y1 - y0
+            dist = math.hypot(dx, dy)
+
+            # Only draw if the two circles do not overlap (edge-to-edge gap > 0)
+            if dist > (r_initial_mm + r_final_mm):
+                ux, uy = dx / dist, dy / dist
+                shift_x.extend([x0 + ux * r_initial_mm, x1 - ux * r_final_mm, None])
+                shift_y.extend([y0 + uy * r_initial_mm, y1 - uy * r_final_mm, None])
+
+        if shift_x:
+            fig.add_trace(
+                go.Scatter(
+                    x=shift_x,
+                    y=shift_y,
+                    mode="lines",
+                    line={"color": "#64748b", "width": 1.5, "dash": "dot"},
+                    visible=show_initial_estimates,
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+
         fig.add_trace(
             go.Scatter(
                 x=[point[0] for point in estimate_points],
